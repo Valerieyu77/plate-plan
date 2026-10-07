@@ -1,0 +1,72 @@
+[
+  {
+    "name": "Chocolate Chip Cookies",
+    "detail_oid": "122744269",
+    "category": "Desserts",
+    "serving_size": "Each",
+    "allergens": [
+      "Eggs",
+      "Gluten",
+      "Milk",
+      "Soy",
+      "Wheat",
+      "Vegetarian"
+    ],
+    "serving_size_raw": "Each (38g)",
+    "kcal": "170",
+    "raw_nutrients": {
+      "Calories": "Calories from Fat72"
+    },
+    "calories_from_fat": "72",
+    "ingredients": "ENRICHED WHEAT FLOUR (CONTAINS BARLEY), SUGAR, SEMI-SWEET CHOCOLATE CHIPS (SUGAR, UNSWEETENEDCHOCOLATE, COCOA BUTTER, SOY LECITHIN, FLAVOUR), PALM OIL SPREAD (PALM OIL, WATER, BUTTER [MILK], SALT,FLAVOUR [CONTAINS MILK], CITRIC ACID, VITAMIN A PALMITATE, BETA CAROTENE [COLOUR]), LIQUIDWHOLE EGGS,BLACKSTRAP MOLASSES, WATER, ARTIFICIAL FLAVOUR, SODIUM BICA RBONATE, SALT.",
+    "contains": null
+  },
+  {
+    "name": "White Chocolate Lemon Cookies",
+    "detail_oid": "122744270",
+    "category": "Desserts",
+    "serving_size": "Each",
+    "allergens": [
+      "Corn",
+      "Eggs",
+      "Gluten",
+      "Milk",
+      "Soy",
+      "Wheat",
+      "Vegetarian"
+    ],
+    "serving_size_raw": "Each (57g)",
+    "kcal": "250",
+    "raw_nutrients": {
+      "Calories": "Calories from Fat108"
+    },
+    "calories_from_fat": "108",
+    "ingredients": "ENRICHED WHEAT FLOUR (WHEAT FLOUR, MALTED BARLEY FLOUR, NIACIN, REDUCED IRON, THIAMINE MONONITRATE, RIBOFLAVIN, FOLIC ACID), SUGAR, WHITE CHUNKS (SUGAR, VEGETABLE FAT [PALM KERNEL AND/OR PALM], NONFAT DRY MILK, MILKFAT, SOY LECITHIN [EMULSIFIER], ARTIFICIAL FLAVORS, SALT), WHITE CHOCOLATE CHUNKS (SUGAR, COCOA BUTTER, WHOLE MILK POWDER, NONFAT DRY MILK, MILKFAT, SOY LECITHIN, NATURAL FLAVOR), BUTTER (CREAM, NATURAL FLAVORING), WHEAT FLOUR, WATER, MARGARINE (PALM OIL, SOYBEAN OIL, WATER, SALT, CONTAINS LESS THAN 2% OF VEGETABLE MONO- AND DIGLYCERIDES, SOY LECITHIN, SODIUM BENZOATE [PRESERVATIVE], CITRIC ACID, NATURAL AND ARTIFICIAL FLAVOR, VITAMIN A PALMITATE, BETA-CAROTENE [COLOR], WHEY), CONTAINS LESS THAN 2% OF ARTIFICIAL YELLOW COLOR (DEXTROSE, YELLOW 5), BAKING SODA, EGGS, MOLASSES, NATURAL AND ARTIFICIAL FLAVORS, SALT, SOY LECITHIN.",
+    "contains": null
+  },
+  {
+    "name": "Butterscotch Blondie",
+    "detail_oid": "122744272",
+    "category": "Desserts",
+    "serving_size": "Slice (1/96)",
+    "allergens": [
+      "Coconut",
+      "Corn",
+      "Eggs",
+      "Gluten",
+      "Milk",
+      "Red Dye",
+      "Soy",
+      "Wheat",
+      "Vegetarian"
+    ],
+    "serving_size_raw": "Slice (1/96) (44g)",
+    "kcal": "180",
+    "raw_nutrients": {
+      "Calories": "Calories from Fat63"
+    },
+    "calories_from_fat": "63",
+    "ingredients": "Mix Cake Yellow Gold Medal (SUGAR, ENRICHED FLOUR BLEACHED (WHEAT FLOUR, NIACIN, IRON, THIAMIN MONONITRATE, RIBOFLAVIN, FOLIC ACID), PALM OIL, DEXTROSE. CONTAINS 2% OR LESS OF: LEAVENING (SODIUM ALUMINUM PHOSPHATE, BAKING SODA), PROPYLENE GLYCOL MONO AND DIESTERS, MODIFIED CORN STARCH, EGGS WITH SODIUM SILICOALUMINATE, EGG WHITE, SALT, NONFAT MILK, MONO AND DIGLYCERIDES, SOY LECITHIN, XANTHAN GUM, WHEY, NATURAL FLAVOR, ANNATTO AND TURMERIC EXTRACT COLOR.), Baking Chips Butterscotch (SUGAR, HYDROGENATED VEGETABLE FAT (PALM KERNEL AND/OR PALM), NONFAT DRY MILK, LACTOSE (MILK), DRY BUTTERMILK, WHEY POWDER (MILK), VEGETABLE FAT (COCONUT AND/OR PALM KERNEL), SOY LECITHIN (AN EMULSIFIER), YELLOW 6 LAKE, YELLOW 5 LAKE, RED 40 LAKE, BLUE 2 LAKE, BLUE 1 LAKE COLOR, NATURAL FLAVORS AND ARTIFICIAL FLAVORS, NATURAL VANILLA EXTRACT, SALT), Butter Solid Block 1# (Cream.), Brown Sugar (Pure Cane Brown Sugar), Large Grade A Shell Eggs (shell eggs), Oil Pan Release Spray Soy-Free (Sunflower/Canola Oil, Sunflower/Canola Lecithin, Extra Virgin Olive Oil, Natural Flavor, Mono- and Diglycerides and Propellant.)",
+    "contains": null
+  }
+]
