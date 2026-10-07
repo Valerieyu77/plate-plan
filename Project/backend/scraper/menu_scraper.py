@@ -307,28 +307,63 @@ def save_items(items: list[dict]) -> tuple[int, int]:
     return inserted, updated
 
 
+def hall_already_saved(hall_name: str, start: date, end: date) -> bool:
+    """True if the database already has rows for this hall in the date range.
+    Halls are saved only after they finish, so existing rows mean the hall completed."""
+    from sqlmodel import Session, select
+
+    from app.database import create_db_and_tables, engine
+    from app.models import MenuItem
+
+    create_db_and_tables()
+    with Session(engine) as session:
+        row = session.exec(
+            select(MenuItem.id).where(
+                MenuItem.hall == hall_name, MenuItem.date >= start, MenuItem.date <= end
+            )
+        ).first()
+    return row is not None
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--days", type=int, default=1, help="how many days from today to scrape (default 1)")
     ap.add_argument("--halls", type=int, nargs="*", help="hall unitOids (default: all)")
     ap.add_argument("--dry-run", action="store_true", help="don't write to the database")
-    ap.add_argument("--json", help="also dump the scraped items to this JSON file")
+    ap.add_argument("--resume", action="store_true",
+                    help="skip halls that already have rows in the database for this date range")
+    ap.add_argument("--json", help="also dump the items scraped in THIS run to this JSON file")
     args = ap.parse_args()
 
     today = date.today()
+    start, end = today, today + timedelta(days=args.days - 1)
     scraper = MenuScraper()
-    gen, stats = scraper.scrape(today, today + timedelta(days=args.days - 1), args.halls)
-    items = list(gen)
+    halls = scraper.list_halls()
+    if args.halls:
+        halls = {oid: name for oid, name in halls.items() if oid in args.halls}
+
+    all_items: list[dict] = []
+    totals = {"menus": 0, "dishes": 0, "skipped_incomplete": 0, "errors": 0}
+    for oid, name in halls.items():
+        if args.resume and not args.dry_run and hall_already_saved(name, start, end):
+            print(f"↷ {name}: already saved, skipping")
+            continue
+        gen, stats = scraper.scrape(start, end, [oid])
+        items = list(gen)
+        for k in totals:
+            totals[k] += stats[k]
+        # Save each hall as soon as it is done, so an interrupted run loses at most one hall
+        if items and not args.dry_run:
+            ins, upd = save_items(items)
+            print(f"  DB: {name}: {ins} inserted, {upd} updated")
+        all_items.extend(items)
 
     if args.json:
         with open(args.json, "w", encoding="utf-8") as f:
-            json.dump(items, f, indent=2, ensure_ascii=False, default=str)
-    if not args.dry_run:
-        ins, upd = save_items(items)
-        print(f"DB: {ins} inserted, {upd} updated")
-    print(f"Done: {stats}")
+            json.dump(all_items, f, indent=2, ensure_ascii=False, default=str)
+    print(f"Done: {totals}")
     # A run that finds nothing, or hits errors, should fail loudly so the scheduled job can alert
-    if not items or stats["errors"]:
+    if (not all_items and not args.resume) or totals["errors"]:
         raise SystemExit(1)
 
 
