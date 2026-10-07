@@ -30,6 +30,9 @@ REQUEST_DELAY = 0.2  # seconds between requests, be polite to the server
 # Tags the site mixes into the allergen list that we store as flags instead
 DIET_TAGS = {"vegetarian", "vegan"}
 
+# Menus that exist on the site but aren't food to recommend
+NON_RECOMMENDABLE_MEALS = {"beverages", "condiments"}
+
 
 class ScrapeError(Exception):
     pass
@@ -254,6 +257,7 @@ class MenuScraper:
                                     **{k: v for k, v in label.items() if k != "name"},
                                     "name": dish["name"] or label.get("name"),
                                     **split_tags(dish["tags"]),
+                                    "is_recommendable": meal.lower() not in NON_RECOMMENDABLE_MEALS,
                                 }
                                 if not is_complete(item):
                                     stats["skipped_incomplete"] += 1
