@@ -141,6 +141,8 @@ class MenuScraper:
         self.session.headers.update(HEADERS)
         self._get(BASE_URL)  # sets the session cookies the API needs
         self._label_cache: dict[str, dict] = {}
+        self._halls: dict[int, str] | None = None
+        self.list_halls()  # read the hall list now, while the session is fresh
 
     def _get(self, url):
         r = self.session.get(url, timeout=30)
@@ -164,10 +166,18 @@ class MenuScraper:
         return ""
 
     def list_halls(self) -> dict[int, str]:
-        """{unitOid: hall name} from the home page."""
-        html = self._get(BASE_URL).text
-        halls = re.findall(r"unitsSelectUnit\((\d+)\);\">([^<]+)</a>", html)
-        return {int(oid): name.strip() for oid, name in halls}
+        """{unitOid: hall name} from the home page.
+
+        Read once and cached: after a unit has been selected the server remembers it,
+        and the home page no longer lists the halls, so re-reading returns nothing.
+        """
+        if self._halls is None:
+            html = self._get(BASE_URL).text
+            halls = re.findall(r"unitsSelectUnit\((\d+)\);\">([^<]+)</a>", html)
+            self._halls = {int(oid): name.strip() for oid, name in halls}
+            if not self._halls:
+                raise ScrapeError("could not read the hall list from the home page")
+        return self._halls
 
     def list_stations(self, hall_oid: int) -> dict[int, str]:
         """{unitOid: station name} for a hall. Empty if the hall has no sub-units."""
@@ -232,6 +242,9 @@ class MenuScraper:
         stats = {"menus": 0, "dishes": 0, "skipped_incomplete": 0, "errors": 0}
         halls = self.list_halls()
         if hall_oids:
+            missing = set(hall_oids) - set(halls)
+            if missing:
+                raise ScrapeError(f"unknown hall unitOid(s): {sorted(missing)}")
             halls = {oid: n for oid, n in halls.items() if oid in hall_oids}
 
         def run():

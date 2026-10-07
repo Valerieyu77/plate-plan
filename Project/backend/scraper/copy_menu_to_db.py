@@ -29,22 +29,24 @@ def main():
 
     inserted = updated = 0
     with Session(source) as src, Session(engine) as dst:
-        for row in src.exec(select(MenuItem)):
+        rows = src.exec(select(MenuItem)).all()
+        print(f"Read {len(rows)} rows from {source_path}; loading what the target already has...")
+
+        # One query for everything already in the target, instead of one per row (much faster over the network)
+        key = lambda m: (m.date, m.hall, m.meal, m.source_id)
+        existing = {key(m): m for m in dst.exec(select(MenuItem)).all()}
+
+        for row in rows:
             data = row.model_dump(exclude={"id"})
-            existing = dst.exec(
-                select(MenuItem).where(
-                    MenuItem.date == row.date, MenuItem.hall == row.hall,
-                    MenuItem.meal == row.meal, MenuItem.source_id == row.source_id,
-                )
-            ).first()
-            if existing:
+            current = existing.get(key(row))
+            if current:
                 for k, v in data.items():
-                    setattr(existing, k, v)
-                dst.add(existing)
+                    setattr(current, k, v)
                 updated += 1
             else:
                 dst.add(MenuItem(**data))
                 inserted += 1
+        print("Writing to the target database...")
         dst.commit()
     print(f"Copied menu items: {inserted} inserted, {updated} updated")
 
