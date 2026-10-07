@@ -1,8 +1,8 @@
-name: Daily menu scrape
+name: Weekly menu scrape
 
 on:
   schedule:
-    - cron: "0 10 * * *"   # 10:00 UTC every day (about 5am in Champaign)
+    - cron: "0 10 * * 1"   # 10:00 UTC every Monday (about 5am in Champaign)
   workflow_dispatch:        # lets you run it by hand from the Actions tab
 
 permissions:
@@ -12,7 +12,9 @@ permissions:
 jobs:
   scrape:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 180
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
     defaults:
       run:
         working-directory: Project/backend
@@ -27,20 +29,25 @@ jobs:
 
       - run: pip install -r requirements.txt
 
-      # Scrapes today + the next 6 days so menu changes get picked up.
-      # Exits non-zero if nothing was scraped or any request failed.
+      # Does nothing until the DATABASE_URL repo secret exists, so it never fails noisily before setup.
+      - name: Skip notice
+        if: env.DATABASE_URL == ''
+        run: echo "::warning::DATABASE_URL secret is not set; skipping the scrape."
+
+      # Scrapes today + the next 13 days (the site publishes ~3 weeks ahead); re-scraping
+      # overlapping days refreshes menu changes. Exits non-zero if nothing was scraped or
+      # any request failed.
       - name: Scrape menus into the database
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        run: python -m scraper.menu_scraper --days 7
+        if: env.DATABASE_URL != ''
+        run: python -m scraper.menu_scraper --days 14
 
       - name: Open an issue if the scrape failed
-        if: failure()
+        if: failure() && env.DATABASE_URL != ''
         env:
           GH_TOKEN: ${{ github.token }}
         working-directory: .
         run: |
           gh issue create \
             --repo "$GITHUB_REPOSITORY" \
-            --title "Daily menu scrape failed ($(date -u +%F))" \
+            --title "Weekly menu scrape failed ($(date -u +%F))" \
             --body "The scheduled scrape failed. Logs: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
