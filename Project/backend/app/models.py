@@ -89,7 +89,8 @@ class MenuItem(SQLModel, table=True):
     date: Date = Field(index=True)  # Date alias: a field named `date` can't be typed `date` when it has a default
     hall: str = Field(index=True)  # e.g. "Ikenberry Dining Center"
     meal: str = Field(index=True)  # "breakfast", "lunch", "dinner" (same values as FoodLog.meal)
-    station: str | None = None  # food category on the site, e.g. "Desserts"
+    station: str | None = None  # sub-unit within the hall, e.g. "Baked Expectations"
+    category: str | None = None  # course group on the site, e.g. "Desserts", "Entrees"
     name: str
 
     # One serving, e.g. 38 "g" or 1 "Each"
