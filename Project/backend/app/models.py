@@ -120,5 +120,6 @@ class MenuItem(SQLModel, table=True):
     is_vegan: bool = False
     ingredients: str | None = None
 
-    # False for menus that shouldn't be recommended as food (beverages, condiments)
+    # True only for main meals (breakfast/lunch/light lunch/dinner/kosher lunch/dinner).
+    # Side menus like salad bar, cereal, beverages are stored but not recommended.
     is_recommendable: bool = True
