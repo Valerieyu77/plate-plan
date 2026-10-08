@@ -83,3 +83,92 @@ def daily_targets(user, goal_type: str, today: date | None = None) -> dict:
         "fat_goal_g": round(fat_g),
         "warning": warning,
     }
+
+
+# ---------- Per-meal targets, cross-meal adjustment, progress ----------
+
+NUTRIENTS = ["kcal", "protein_g", "carbs_g", "fat_g"]
+
+# Meals map to a slot of the day. Light lunch and lunch share the midday slot (a hall serves one or the other).
+MEAL_SLOT = {
+    "breakfast": 0,
+    "light lunch": 1, "lunch": 1, "kosher lunch": 1,
+    "dinner": 2, "kosher dinner": 2,
+}
+# Share of the day's food for each slot, when all three are still ahead
+SLOT_WEIGHT = {0: 0.25, 1: 0.35, 2: 0.40}
+
+
+def zero_nutrients() -> dict:
+    return {k: 0.0 for k in NUTRIENTS}
+
+
+def add_nutrients(a: dict, b: dict, times: float = 1.0) -> dict:
+    return {k: a[k] + times * b[k] for k in NUTRIENTS}
+
+
+def goal_to_targets(goal) -> dict:
+    """A Goal row -> {kcal, protein_g, carbs_g, fat_g}; unset values count as 0."""
+    return {
+        "kcal": goal.calorie_goal or 0,
+        "protein_g": goal.protein_goal_g or 0,
+        "carbs_g": goal.carb_goal_g or 0,
+        "fat_g": goal.fat_goal_g or 0,
+    }
+
+
+def item_nutrients(item, servings: float) -> dict:
+    """Nutrients of `servings` servings of a menu item (menu values are per ONE serving)."""
+    return {k: servings * (getattr(item, k) or 0) for k in NUTRIENTS}
+
+
+def meal_target(daily: dict, consumed_by_meal: dict[str, dict], meal: str) -> dict:
+    """
+    How much is left to eat at `meal`, given what was already logged today.
+
+    daily:            {kcal, protein_g, carbs_g, fat_g} for the whole day
+    consumed_by_meal: {meal name: nutrients eaten at that meal so far today}
+
+    Meals in earlier slots are over, so what they used is subtracted from the day. What is left is
+    shared between this slot and the slots after it, by SLOT_WEIGHT. Anything already eaten at this
+    slot is subtracted again, so a half-logged lunch asks for the rest of lunch.
+    Returns {"target": ..., "meal_budget": ..., "consumed_this_meal": ..., "remaining_day": ...}.
+    """
+    key = meal.strip().lower()
+    if key not in MEAL_SLOT:
+        raise ValueError(f"unknown meal '{meal}'; expected one of {sorted(MEAL_SLOT)}")
+    slot = MEAL_SLOT[key]
+
+    consumed_here = zero_nutrients()
+    consumed_other = zero_nutrients()
+    for name, nutrients in consumed_by_meal.items():
+        other_slot = MEAL_SLOT.get(name.strip().lower())
+        if other_slot == slot:
+            consumed_here = add_nutrients(consumed_here, nutrients)
+        else:
+            consumed_other = add_nutrients(consumed_other, nutrients)
+
+    later = [s for s in SLOT_WEIGHT if s > slot]
+    share = SLOT_WEIGHT[slot] / (SLOT_WEIGHT[slot] + sum(SLOT_WEIGHT[s] for s in later))
+
+    budget, target = {}, {}
+    for k in NUTRIENTS:
+        budget[k] = max(0.0, daily[k] - consumed_other[k]) * share
+        target[k] = max(0.0, budget[k] - consumed_here[k])
+    total_eaten = add_nutrients(consumed_here, consumed_other)
+    return {
+        "target": {k: round(v, 1) for k, v in target.items()},
+        "meal_budget": {k: round(v, 1) for k, v in budget.items()},
+        "consumed_this_meal": {k: round(v, 1) for k, v in consumed_here.items()},
+        "remaining_day": {k: round(max(0.0, daily[k] - total_eaten[k]), 1) for k in NUTRIENTS},
+    }
+
+
+def day_progress(daily: dict, consumed: dict) -> dict:
+    """Target vs actual for a day. `remaining` never goes below 0 (going over shows in `over`)."""
+    return {
+        "target": {k: round(daily[k], 1) for k in NUTRIENTS},
+        "actual": {k: round(consumed[k], 1) for k in NUTRIENTS},
+        "remaining": {k: round(max(0.0, daily[k] - consumed[k]), 1) for k in NUTRIENTS},
+        "over": {k: round(max(0.0, consumed[k] - daily[k]), 1) for k in NUTRIENTS},
+    }

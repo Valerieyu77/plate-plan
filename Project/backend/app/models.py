@@ -95,6 +95,18 @@ class WeightLog(SQLModel, table=True):
     weight_lbs: float
 
 
+class WeightLogCreate(SQLModel):
+    weight_lbs: float = Field(gt=0)
+    date: Date | None = None  # defaults to today
+
+
+class WeightLogPublic(SQLModel):
+    id: int
+    user_id: int
+    date: Date
+    weight_lbs: float
+
+
 # ---------- Food log ----------
 
 class FoodLog(SQLModel, table=True):
@@ -172,3 +184,27 @@ class MenuItem(SQLModel, table=True):
     # True only for main meals (breakfast/lunch/light lunch/dinner/kosher lunch/dinner).
     # Side menus like salad bar, cereal, beverages are stored but not recommended.
     is_recommendable: bool = True
+
+
+class MenuItemPublic(SQLModel):
+    """What the API shows for a dish (no ingredients text or scraper ids). Nutrients are per ONE serving."""
+    id: int
+    date: Date
+    hall: str
+    meal: str
+    station: str | None = None
+    category: str | None = None
+    name: str
+    serving_size: float | None = None
+    serving_unit: str | None = None
+    serving_grams: float | None = None
+    kcal: float
+    protein_g: float
+    carbs_g: float
+    fat_g: float
+    fiber_g: float | None = None
+    sugar_g: float | None = None
+    sodium_mg: float | None = None
+    allergens: list[str] = []
+    is_vegetarian: bool = False
+    is_vegan: bool = False
