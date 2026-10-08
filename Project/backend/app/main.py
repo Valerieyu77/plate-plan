@@ -3,10 +3,14 @@ from datetime import date
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import Session, select
 
 from .database import create_db_and_tables, get_session
-from .models import FoodLog, FoodLogCreate, FoodLogPublic, MenuItem, User, UserCreate, UserPublic
+from .models import (
+    FoodLog, FoodLogCreate, FoodLogPublic, Goal, GoalCreate, GoalPublic, MenuItem, User, UserCreate, UserPublic,
+)
+from .nutrition import daily_targets
 
 
 @asynccontextmanager
@@ -17,6 +21,15 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="UIUC Dining Nutrition API", lifespan=lifespan)
+
+# Let the browser frontend call this API from another address (local dev server or Vercel).
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:3000"],
+    allow_origin_regex=r"https://.*\.vercel\.app",
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Endpoints that list this as a parameter get a database session automatically
 SessionDep = Annotated[Session, Depends(get_session)]
@@ -86,3 +99,32 @@ def list_food_logs(user_id: int, date: date, session: SessionDep):
     if not session.get(User, user_id):
         raise HTTPException(status_code=404, detail="User not found")
     return session.exec(select(FoodLog).where(FoodLog.user_id == user_id, FoodLog.date == date)).all()
+
+
+@app.put("/users/{user_id}/goal", response_model=GoalPublic)
+def set_goal(user_id: int, goal: GoalCreate, session: SessionDep):
+    """Pick lose / maintain / gain; the daily calorie and macro targets are calculated and saved."""
+    user = session.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    try:
+        targets = daily_targets(user, goal.goal_type)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    warning = targets.pop("warning")
+    db_goal = session.get(Goal, user_id) or Goal(user_id=user_id)
+    for key, value in targets.items():
+        setattr(db_goal, key, value)
+    session.add(db_goal)
+    session.commit()
+    session.refresh(db_goal)
+    return GoalPublic(**db_goal.model_dump(), warning=warning)
+
+
+@app.get("/users/{user_id}/goal", response_model=GoalPublic)
+def read_goal(user_id: int, session: SessionDep):
+    goal = session.get(Goal, user_id)
+    if not goal:
+        raise HTTPException(status_code=404, detail="No goal set for this user")
+    return goal

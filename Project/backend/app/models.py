@@ -1,9 +1,13 @@
 from datetime import date
 
+from pydantic import field_validator
 from sqlalchemy import UniqueConstraint
 from sqlmodel import SQLModel, Field, Column, JSON
 
 Date = date
+
+ACTIVITY_LEVELS = ["sedentary", "light", "moderate", "active", "very_active"]
+GOAL_TYPES = ["lose", "maintain", "gain"]
 
 
 # ---------- User ----------
@@ -22,6 +26,14 @@ class UserBase(SQLModel):
     # Food needs and preferences (lists)
     allergies: list[str] = Field(default_factory=list, sa_column=Column(JSON))
     dietary_restrictions: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+
+    @field_validator("activity_level")
+    @classmethod
+    def _check_activity_level(cls, v):
+        # Stored as plain text; the allowed values are checked when the API receives them
+        if v is not None and v not in ACTIVITY_LEVELS:
+            raise ValueError(f"activity_level must be one of {ACTIVITY_LEVELS}")
+        return v
 
 
 class User(UserBase, table=True):
@@ -50,6 +62,28 @@ class Goal(SQLModel, table=True):
     carb_goal_g: int | None = None
     fat_goal_g: int | None = None
     sugar_limit_g: int | None = None
+
+
+class GoalCreate(SQLModel):
+    goal_type: str  # "lose", "maintain" or "gain"
+
+    @field_validator("goal_type")
+    @classmethod
+    def _check_goal_type(cls, v):
+        if v not in GOAL_TYPES:
+            raise ValueError(f"goal_type must be one of {GOAL_TYPES}")
+        return v
+
+
+class GoalPublic(SQLModel):
+    user_id: int
+    target_weight_lbs: float | None = None
+    calorie_goal: int | None = None
+    protein_goal_g: int | None = None
+    carb_goal_g: int | None = None
+    fat_goal_g: int | None = None
+    sugar_limit_g: int | None = None
+    warning: str | None = None  # set when the calorie target was raised to the safe minimum
 
 
 # ---------- Weight log ----------
