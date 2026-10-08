@@ -12,7 +12,7 @@ Base URL: `http://127.0.0.1:8000` locally. Interactive docs: `/docs`.
 - All nutrient values on a menu item are **per ONE serving**.
 - No login in the prototype: sign-up returns a `user_id`; the frontend keeps it (e.g. in localStorage) and puts it in the URL.
 - Errors: `404` not found, `409` duplicate email, `422` invalid input. Body: `{"detail": "..."}`.
-- CORS must be enabled on the backend so the browser can call it (`CORSMiddleware`, allow the frontend origin).
+- CORS is enabled for `http://localhost:5173`, `http://localhost:3000` and any `https://*.vercel.app` (PR #9). Tell C if the frontend runs somewhere else.
 
 Status: ✅ built and merged, 🟡 build with mock data first, ⬜ not started.
 
@@ -21,7 +21,7 @@ Status: ✅ built and merged, 🟡 build with mock data first, ⬜ not started.
 | Step in the app | Endpoint |
 |---|---|
 | Sign up with body info | `POST /users` ✅ |
-| Set a goal, get daily targets | `PUT /users/{id}/goal` 🟡 |
+| Set a goal, get daily targets | `PUT /users/{id}/goal` ✅ |
 | Choose hall + date, see which meals exist | `GET /meals` ✅ |
 | Get recommended dishes for that meal | `GET /recommendations/meals` 🟡 |
 | Check off what was eaten | `POST /users/{id}/food-logs` ✅ (undo: `DELETE`, ⬜) |
@@ -43,28 +43,27 @@ Create a user. Returns `201` with the user (including `id`), `409` if the email 
 ```
 - `allergies` names: Milk, Eggs, Fish, Shellfish, Peanuts, Tree Nuts, Soy, Wheat, Gluten, Sesame, Corn, Coconut, Sulfites, MSG, Red Dye.
 - `dietary_restrictions`: vegetarian, vegan, kosher, halal, jain, no pork, no alcohol, no gelatin. (See `app/dietary.py`.)
-- `activity_level`: **TBD by B**, suggested `sedentary | light | moderate | active | very_active`.
+- `activity_level` (optional, default `light`): one of `sedentary`, `light`, `moderate`, `active`, `very_active`. Anything else gets `422`.
 
 ### `GET /users/{id}` ✅
 Returns the same shape as above plus `id`.
 
-### `PUT /users/{id}/goal` 🟡 (B computes, C exposes)
-Sets the goal and returns the computed daily targets.
+### `PUT /users/{id}/goal` ✅ (PR #9)
+Pick a goal type; the daily targets are calculated and saved. The prototype follows the frontend design: lose / maintain / gain, no target weight or timeline.
 ```json
 // request
-{ "target_weight_lbs": 130, "weeks": 12 }
+{ "goal_type": "lose" }
 // response
 {
-  "user_id": 1, "target_weight_lbs": 130,
-  "calorie_goal": 1650, "protein_goal_g": 120, "carb_goal_g": 170, "fat_goal_g": 55,
-  "warning": null, "suggested_weeks": null
+  "user_id": 1, "target_weight_lbs": null,
+  "calorie_goal": 1450, "protein_goal_g": 127, "carb_goal_g": 160, "fat_goal_g": 40, "sugar_limit_g": null,
+  "warning": null
 }
 ```
-If the goal is unsafe (more than ~1% of body weight per week, or below the minimum intake), the
-targets are for the safe pace and `warning` explains it, with `suggested_weeks` set.
-**Open question (B + C):** `Goal.target_date` was removed, so the timeline is passed as `weeks` here and not stored. Confirm.
+`goal_type` is `lose` (-450 kcal), `maintain` (0) or `gain` (+400 kcal). `422` if the profile lacks weight, height, gender or birthdate (the message lists what is missing). `warning` is set if the calories were raised to the safe minimum.
+A timeline (target weight + weeks) can be added later as an extra input without changing the table.
 
-### `GET /users/{id}/goal` ⬜
+### `GET /users/{id}/goal` ✅ (PR #9)
 Returns the stored goal (same fields as the response above). `404` if none.
 
 ### `GET /meals?hall=&date=&main_only=` ✅
@@ -142,7 +141,7 @@ Target vs actual for a day, plus the weight trend, for the progress page.
 `actual` = sum of (`servings` × per-serving nutrient) over that day's food logs.
 
 ## Who builds what
-- **C:** every endpoint above, CORS, deployment (Render, `DATABASE_URL` env var).
+- **C:** every endpoint above, deployment (Render, `DATABASE_URL` env var).
 - **B:** target and progress calculations as plain functions (suggested `app/nutrition.py`); C calls them.
 - **D:** `recommend(target, items) -> {items, total, note}` as a plain function; C calls it.
 - **A:** menu data (`menuitem` table, kept fresh), `GET /halls` and `GET /menu-items` if C wants them, end-to-end tests.
