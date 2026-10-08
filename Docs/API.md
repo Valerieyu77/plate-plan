@@ -22,11 +22,14 @@ Status: ✅ built and merged, 🟡 build with mock data first, ⬜ not started.
 |---|---|
 | Sign up with body info | `POST /users` ✅ |
 | Set a goal, get daily targets | `PUT /users/{id}/goal` ✅ |
-| Choose hall + date, see which meals exist | `GET /meals` ✅ |
-| Get recommended dishes for that meal | `GET /recommendations/meals` 🟡 |
-| Check off what was eaten | `POST /users/{id}/food-logs` ✅ (undo: `DELETE`, ⬜) |
-| Log weight | `POST /users/{id}/weight-logs` ⬜ |
-| Progress page: target vs actual, weight trend | `GET /users/{id}/progress` 🟡 |
+| Choose hall + date, see which meals exist | `GET /halls` ✅, `GET /meals` ✅ |
+| See this meal's target and the dishes the user can eat | `GET /users/{id}/meal-target` ✅, `GET /menu-items?user_id=` ✅ |
+| Get recommended dishes for that meal | `GET /recommendations/meals` 🟡 (D) |
+| Check off / un-check what was eaten | `POST` ✅ and `DELETE /users/{id}/food-logs` ✅ |
+| Log weight | `POST /users/{id}/weight-logs` ✅ |
+| Progress page: target vs actual, weight trend | `GET /users/{id}/progress` ✅ |
+
+Everything marked ✅ is in PR #9 (or already merged) and has tests.
 
 ## Endpoints
 
@@ -75,20 +78,37 @@ Meals a hall serves on a date, for the dropdown. Returns a list of strings in ti
 Hall names come from the data, e.g. `Ikenberry Dining Center (Ike)`, `Illinois Street Dining Center (ISR)`,
 `Pennsylvania Avenue Dining Hall (PAR)`, `Lincoln Avenue Dining Hall (LAR)`.
 
-### `GET /halls` ⬜
-List of hall names that have data, so the frontend doesn't hardcode them.
+### `GET /halls?date=` ✅
+Hall names that have menu data (on `date`, if given), for the hall dropdown.
 ```json
 ["Ikenberry Dining Center (Ike)", "Illinois Street Dining Center (ISR)", "..."]
 ```
 
-### `GET /menu-items?hall=&date=&meal=` ⬜
-The dishes on a menu, for browsing and for logging a dish by hand. `main_only` not needed: filter by `meal`.
+### `GET /menu-items?hall=&date=&meal=&user_id=&include_side_menus=` ✅
+The dishes on a menu. With `user_id`, dishes that break that user's allergies or dietary restrictions are removed. Side menus (salad bar, beverages, ...) are skipped unless `include_side_menus=true`.
 ```json
-[{ "id": 1234, "name": "Cobb Salad", "category": "Salads & Salad Bar", "station": "Euclid Street Deli",
+[{ "id": 1234, "date": "2026-10-08", "hall": "Illinois Street Dining Center (ISR)", "meal": "lunch",
+   "station": "Euclid Street Deli", "category": "Salads & Salad Bar", "name": "Cobb Salad",
    "serving_size": 1, "serving_unit": "Cup", "serving_grams": 226,
-   "kcal": 500, "protein_g": 38, "carbs_g": 2, "fat_g": 36,
+   "kcal": 500, "protein_g": 38, "carbs_g": 2, "fat_g": 36, "fiber_g": null, "sugar_g": null, "sodium_mg": 1330,
    "allergens": ["Eggs", "Milk"], "is_vegetarian": false, "is_vegan": false }]
 ```
+Nutrients are per ONE serving.
+
+### `GET /users/{id}/meal-target?date=&meal=` ✅
+What is left to eat at this meal. The day's target minus what was logged at earlier meals is shared between this meal and the later ones, then what is already logged at this meal is subtracted. This is the target the recommendation step is asked to hit.
+```json
+{
+  "date": "2026-10-08", "meal": "dinner",
+  "daily_target":       { "kcal": 1450, "protein_g": 127, "carbs_g": 160, "fat_g": 40 },
+  "target":             { "kcal": 820,  "protein_g": 70,  "carbs_g": 95,  "fat_g": 24 },
+  "meal_budget":        { "kcal": 820,  "protein_g": 70,  "carbs_g": 95,  "fat_g": 24 },
+  "consumed_this_meal": { "kcal": 0,    "protein_g": 0,   "carbs_g": 0,   "fat_g": 0 },
+  "remaining_day":      { "kcal": 820,  "protein_g": 70,  "carbs_g": 95,  "fat_g": 24 }
+}
+```
+`404` if the user has no goal yet; `422` if `meal` is not breakfast, lunch, light lunch, dinner, kosher lunch or kosher dinner.
+Meal weights: breakfast 0.25, lunch / light lunch 0.35, dinner 0.40 (renormalised over the meals still ahead).
 
 ### `GET /recommendations/meals?user_id=&hall=&date=&meal=` 🟡 (B + D compute, C exposes)
 Recommended dishes for one meal. Returns hard-coded mock data at first.
@@ -105,8 +125,8 @@ Recommended dishes for one meal. Returns hard-coded mock data at first.
 ```
 - `items[].kcal` etc. are the **totals for that line** (per-serving × `servings`).
 - `note` is set when no exact match was possible ("closest option: ...").
-- `target` is this meal's share of the daily target, after subtracting what the user already logged today.
-- Allergies/restrictions are applied before the algorithm runs (B filters, D chooses).
+- `target` is the `target` from `GET /users/{id}/meal-target`.
+- The candidate dishes are the ones from `GET /menu-items?user_id=` (allergies/restrictions already applied); D chooses among them.
 
 ### `POST /users/{id}/food-logs` ✅
 Log a dish. `date` and `meal` default to the menu item's own.
@@ -118,31 +138,35 @@ Returns `201`: `{ "id", "user_id", "date", "meal", "servings", "item_id" }`. `40
 ### `GET /users/{id}/food-logs?date=` ✅
 That day's logs, same shape as above, as a list.
 
-### `DELETE /users/{id}/food-logs/{log_id}` ⬜
-Un-check a dish. `204`.
+### `DELETE /users/{id}/food-logs/{log_id}` ✅
+Un-check a dish. `204`, or `404` if the log doesn't exist or belongs to another user.
 
-### `POST /users/{id}/weight-logs` ⬜
+### `POST /users/{id}/weight-logs` ✅
 ```json
 { "date": "2026-10-08", "weight_lbs": 139.4 }
 ```
-Returns `201` with the stored row. `GET /users/{id}/weight-logs` returns the list, oldest first.
+`date` defaults to today. Returns `201` with `{ "id", "user_id", "date", "weight_lbs" }`; `422` if the weight is not positive. The user's current `weight_lbs` follows the most recent weigh-in.
 
-### `GET /users/{id}/progress?date=` 🟡 (B computes, C exposes)
-Target vs actual for a day, plus the weight trend, for the progress page.
+### `GET /users/{id}/weight-logs` ✅
+The list, oldest first.
+
+### `GET /users/{id}/progress?date=` ✅
+Target vs actual for a day, plus the weight history for the trend chart. `404` if the user has no goal yet.
 ```json
 {
   "date": "2026-10-08",
-  "target":    { "kcal": 1650, "protein_g": 120, "carbs_g": 170, "fat_g": 55 },
-  "actual":    { "kcal": 1210, "protein_g": 88,  "carbs_g": 130, "fat_g": 40 },
-  "remaining": { "kcal": 440,  "protein_g": 32,  "carbs_g": 40,  "fat_g": 15 },
+  "target":    { "kcal": 1450, "protein_g": 127, "carbs_g": 160, "fat_g": 40 },
+  "actual":    { "kcal": 1100, "protein_g": 88,  "carbs_g": 130, "fat_g": 35 },
+  "remaining": { "kcal": 350,  "protein_g": 39,  "carbs_g": 30,  "fat_g": 5 },
+  "over":      { "kcal": 0,    "protein_g": 0,   "carbs_g": 0,   "fat_g": 0 },
   "weight_trend": [ { "date": "2026-10-01", "weight_lbs": 140.2 }, { "date": "2026-10-08", "weight_lbs": 139.4 } ]
 }
 ```
-`actual` = sum of (`servings` × per-serving nutrient) over that day's food logs.
+`actual` = sum of (`servings` x per-serving nutrient) over that day's food logs. `remaining` never goes below 0; going over shows up in `over`.
 
 ## Who builds what
 - **C:** every endpoint above, deployment (Render, `DATABASE_URL` env var).
-- **B:** target and progress calculations as plain functions (suggested `app/nutrition.py`); C calls them.
+- **B:** owns `app/nutrition.py` (a working baseline is in PR #9): daily targets, per-meal split, cross-meal adjustment, progress. Still open for B: stricter safety limits, an optional timeline, tuning the meal weights.
 - **D:** `recommend(target, items) -> {items, total, note}` as a plain function; C calls it.
-- **A:** menu data (`menuitem` table, kept fresh), `GET /halls` and `GET /menu-items` if C wants them, end-to-end tests.
+- **A:** menu data (`menuitem` table, kept fresh), `GET /halls`, `GET /menu-items`, end-to-end tests.
 - **Frontend:** build against this document with mock data, switch the base URL when the backend is ready.
