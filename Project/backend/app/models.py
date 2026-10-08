@@ -1,9 +1,13 @@
 from datetime import date
 
+from pydantic import field_validator
 from sqlalchemy import UniqueConstraint
 from sqlmodel import SQLModel, Field, Column, JSON
 
 Date = date
+
+ACTIVITY_LEVELS = ["sedentary", "light", "moderate", "active", "very_active"]
+GOAL_TYPES = ["lose", "maintain", "gain"]
 
 
 # ---------- User ----------
@@ -22,6 +26,14 @@ class UserBase(SQLModel):
     # Food needs and preferences (lists)
     allergies: list[str] = Field(default_factory=list, sa_column=Column(JSON))
     dietary_restrictions: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+
+    @field_validator("activity_level")
+    @classmethod
+    def _check_activity_level(cls, v):
+        # Stored as plain text; the allowed values are checked when the API receives them
+        if v is not None and v not in ACTIVITY_LEVELS:
+            raise ValueError(f"activity_level must be one of {ACTIVITY_LEVELS}")
+        return v
 
 
 class User(UserBase, table=True):
@@ -52,12 +64,46 @@ class Goal(SQLModel, table=True):
     sugar_limit_g: int | None = None
 
 
+class GoalCreate(SQLModel):
+    goal_type: str  # "lose", "maintain" or "gain"
+
+    @field_validator("goal_type")
+    @classmethod
+    def _check_goal_type(cls, v):
+        if v not in GOAL_TYPES:
+            raise ValueError(f"goal_type must be one of {GOAL_TYPES}")
+        return v
+
+
+class GoalPublic(SQLModel):
+    user_id: int
+    target_weight_lbs: float | None = None
+    calorie_goal: int | None = None
+    protein_goal_g: int | None = None
+    carb_goal_g: int | None = None
+    fat_goal_g: int | None = None
+    sugar_limit_g: int | None = None
+    warning: str | None = None  # set when the calorie target was raised to the safe minimum
+
+
 # ---------- Weight log ----------
 
 class WeightLog(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     user_id: int = Field(foreign_key="user.id", index=True)
     date: date
+    weight_lbs: float
+
+
+class WeightLogCreate(SQLModel):
+    weight_lbs: float = Field(gt=0)
+    date: Date | None = None  # defaults to today
+
+
+class WeightLogPublic(SQLModel):
+    id: int
+    user_id: int
+    date: Date
     weight_lbs: float
 
 
@@ -138,3 +184,27 @@ class MenuItem(SQLModel, table=True):
     # True only for main meals (breakfast/lunch/light lunch/dinner/kosher lunch/dinner).
     # Side menus like salad bar, cereal, beverages are stored but not recommended.
     is_recommendable: bool = True
+
+
+class MenuItemPublic(SQLModel):
+    """What the API shows for a dish (no ingredients text or scraper ids). Nutrients are per ONE serving."""
+    id: int
+    date: Date
+    hall: str
+    meal: str
+    station: str | None = None
+    category: str | None = None
+    name: str
+    serving_size: float | None = None
+    serving_unit: str | None = None
+    serving_grams: float | None = None
+    kcal: float
+    protein_g: float
+    carbs_g: float
+    fat_g: float
+    fiber_g: float | None = None
+    sugar_g: float | None = None
+    sodium_mg: float | None = None
+    allergens: list[str] = []
+    is_vegetarian: bool = False
+    is_vegan: bool = False
