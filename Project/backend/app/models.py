@@ -22,7 +22,6 @@ class UserBase(SQLModel):
     # Food needs and preferences (lists)
     allergies: list[str] = Field(default_factory=list, sa_column=Column(JSON))
     dietary_restrictions: list[str] = Field(default_factory=list, sa_column=Column(JSON))
-    food_preferences: list[str] = Field(default_factory=list, sa_column=Column(JSON))
 
 
 class User(UserBase, table=True):
@@ -44,7 +43,6 @@ class Goal(SQLModel, table=True):
     user_id: int = Field(foreign_key="user.id", primary_key=True)
 
     target_weight_lbs: float | None = None
-    target_date: date | None = None
 
     # Daily nutrition goals
     calorie_goal: int | None = None
@@ -73,6 +71,23 @@ class FoodLog(SQLModel, table=True):
     servings: float = 1
     # Links to the dish eaten; nullable so older/manual logs still work
     item_id: int | None = Field(default=None, foreign_key="menuitem.id", index=True)
+
+
+class FoodLogCreate(SQLModel):
+    # The dish eaten. date and meal default to the menu item's own date and meal.
+    item_id: int
+    servings: float = Field(default=1, gt=0)
+    date: Date | None = None
+    meal: str | None = None
+
+
+class FoodLogPublic(SQLModel):
+    id: int
+    user_id: int
+    date: Date
+    meal: str
+    servings: float
+    item_id: int | None
 
 
 # ---------- Menu item (written by the scraper, read by everyone else) ----------
