@@ -199,3 +199,25 @@ def test_weight_logs_and_trend(client):
     assert [w["weight_lbs"] for w in trend] == [140.2, 139.4]
     assert client.post(f"/users/{uid}/weight-logs", json={"weight_lbs": 0}).status_code == 422
     assert client.post("/users/999/weight-logs", json={"weight_lbs": 150}).status_code == 404
+
+
+def test_recommendation_has_the_documented_shape_and_respects_allergies(client):
+    uid = make_user(client, allergies=["Milk"])
+    client.put(f"/users/{uid}/goal", json={"goal_type": "maintain"})
+    r = client.get("/recommendations/meals", params={
+        "user_id": uid, "hall": "Illinois Street Dining Center (ISR)", "date": DAY, "meal": "lunch"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert set(body) == {"items", "total", "target", "note"}
+    assert body["items"] and "Cheese Pizza" not in [i["name"] for i in body["items"]]
+    for key in ("kcal", "protein_g", "carbs_g", "fat_g"):
+        assert body["total"][key] == pytest.approx(sum(i[key] for i in body["items"]))
+    target = client.get(f"/users/{uid}/meal-target", params={"date": DAY, "meal": "lunch"}).json()["target"]
+    assert body["target"] == target
+
+
+def test_recommendation_needs_a_goal(client):
+    uid = make_user(client)
+    r = client.get("/recommendations/meals", params={
+        "user_id": uid, "hall": "Illinois Street Dining Center (ISR)", "date": DAY, "meal": "lunch"})
+    assert r.status_code == 404
