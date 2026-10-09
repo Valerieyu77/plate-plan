@@ -12,6 +12,7 @@ from .models import (
     UserPublic, WeightLog, WeightLogCreate, WeightLogPublic,
 )
 from .dietary import allowed_for_user
+from .recommend import recommend
 from .nutrition import (
     add_nutrients, daily_targets, day_progress, goal_to_targets, item_nutrients, meal_target, zero_nutrients,
 )
@@ -260,3 +261,33 @@ def read_progress(user_id: int, date: date, session: SessionDep):
         **day_progress(daily, eaten),
         "weight_trend": [{"date": w.date, "weight_lbs": w.weight_lbs} for w in weights],
     }
+
+
+# ---------- Recommendations ----------
+
+def _placeholder_recommendation(target: dict, items: list[MenuItem]) -> dict:
+    """Stand-in until D's recommend() is written: one serving of each dish in menu order until the
+    calories reach the target (at most 3 dishes). Same response shape as recommend()."""
+    lines, total = [], zero_nutrients()
+    for item in items[:3]:
+        if total["kcal"] >= target["kcal"]:
+            break
+        nutrients = item_nutrients(item, 1)
+        lines.append({"item_id": item.id, "name": item.name, "servings": 1, **nutrients})
+        total = add_nutrients(total, nutrients)
+    return {"items": lines, "total": total, "target": target,
+            "note": "Placeholder: not optimised yet." if lines else "No dishes on this menu fit your restrictions."}
+
+
+@app.get("/recommendations/meals")
+def recommend_meal(user_id: int, hall: str, date: date, meal: str, session: SessionDep):
+    """
+    Recommended dishes for one meal: aims at the meal's target from GET /users/{id}/meal-target,
+    choosing among the dishes from GET /menu-items?user_id= (allergies and restrictions applied).
+    """
+    target = read_meal_target(user_id, date, meal, session)["target"]
+    items = list_menu_items(hall, date, session, meal=meal, user_id=user_id)
+    try:
+        return recommend(target, [item.model_dump() for item in items])
+    except NotImplementedError:
+        return _placeholder_recommendation(target, items)
