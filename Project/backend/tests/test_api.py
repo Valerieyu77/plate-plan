@@ -141,14 +141,15 @@ def test_meal_target_adjusts_after_logging_food(client):
     uid = make_user(client)
     daily = client.put(f"/users/{uid}/goal", json={"goal_type": "maintain"}).json()["calorie_goal"]
     before = client.get(f"/users/{uid}/meal-target", params={"date": DAY, "meal": "dinner"}).json()
-    assert before["target"]["kcal"] == pytest.approx(daily, abs=1)  # dinner is the last meal: all that's left
+    assert before["target"]["kcal"] == pytest.approx(daily * 0.40, abs=1)  # nothing logged: dinner's 40% of the day
 
     lunch_items = client.get("/menu-items", params={"hall": ISR, "date": DAY, "meal": "lunch"}).json()
     chicken = next(i for i in lunch_items if i["name"] == "Grilled Chicken")
     client.post(f"/users/{uid}/food-logs", json={"item_id": chicken["id"], "servings": 2})  # 600 kcal at lunch
 
     after = client.get(f"/users/{uid}/meal-target", params={"date": DAY, "meal": "dinner"}).json()
-    assert after["target"]["kcal"] == pytest.approx(daily - 600, abs=1)
+    # lunch is logged; breakfast is not, so the rest is shared between breakfast and dinner: 0.40 / 0.65
+    assert after["target"]["kcal"] == pytest.approx((daily - 600) * 0.40 / 0.65, abs=1)
     assert after["remaining_day"]["kcal"] == pytest.approx(daily - 600, abs=1)
 
 

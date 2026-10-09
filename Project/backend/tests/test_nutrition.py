@@ -88,9 +88,23 @@ def test_first_meal_of_the_day_gets_its_weighted_share():
     assert r["remaining_day"]["kcal"] == 2000
 
 
-def test_each_meal_gets_the_weighted_share_of_what_is_left():
-    assert meal_target(DAILY, {}, "lunch")["target"]["kcal"] == pytest.approx(2000 * 0.35 / 0.75, abs=0.1)
-    assert meal_target(DAILY, {}, "dinner")["target"]["kcal"] == pytest.approx(2000, abs=0.1)  # last meal: all that's left
+def test_each_meal_gets_the_weighted_share_of_the_day_when_nothing_is_logged():
+    assert meal_target(DAILY, {}, "lunch")["target"]["kcal"] == pytest.approx(2000 * 0.35, abs=0.1)
+    # dinner with nothing logged is dinner's 40% of the day, not the whole day
+    assert meal_target(DAILY, {}, "dinner")["target"]["kcal"] == pytest.approx(2000 * 0.40, abs=0.1)
+
+
+def test_unlogged_earlier_meals_still_count_as_still_to_come():
+    # the user may just not have logged breakfast and lunch yet
+    r = meal_target(DAILY, {}, "dinner")
+    assert r["target"]["kcal"] < DAILY["kcal"] / 2
+
+
+def test_a_logged_later_meal_is_not_shared_again():
+    eaten = {"dinner": {"kcal": 900, "protein_g": 40, "carbs_g": 100, "fat_g": 30}}
+    r = meal_target(DAILY, eaten, "lunch")
+    # 1100 kcal left, shared between lunch and the unlogged breakfast: 0.35 / (0.25 + 0.35)
+    assert r["target"]["kcal"] == pytest.approx(1100 * 0.35 / 0.60, abs=0.1)
 
 
 def test_cross_meal_adjustment_after_a_big_breakfast():
@@ -104,7 +118,7 @@ def test_cross_meal_adjustment_after_a_big_breakfast():
 def test_half_logged_meal_asks_for_the_rest_of_that_meal():
     eaten = {"lunch": {"kcal": 300, "protein_g": 10, "carbs_g": 40, "fat_g": 10}}
     r = meal_target(DAILY, eaten, "lunch")
-    budget = 2000 * 0.35 / 0.75
+    budget = 2000 * 0.35  # nothing else logged, so lunch gets its 35% of the day
     assert r["meal_budget"]["kcal"] == pytest.approx(budget, abs=0.1)
     assert r["target"]["kcal"] == pytest.approx(budget - 300, abs=0.1)
     assert r["consumed_this_meal"]["kcal"] == 300
@@ -142,3 +156,28 @@ def test_item_nutrients_scale_with_servings_and_ignore_missing_values():
 def test_goal_to_targets_treats_unset_as_zero():
     g = NS(calorie_goal=1800, protein_goal_g=None, carb_goal_g=200, fat_goal_g=50)
     assert goal_to_targets(g) == {"kcal": 1800, "protein_g": 0, "carbs_g": 200, "fat_g": 50}
+
+
+# ---------- macros must fit inside the calorie target ----------
+
+def test_macros_are_scaled_to_fit_the_calories_left():
+    # lots of kcal eaten but little protein/carbs/fat counted against the day: the raw leftovers
+    # (protein 44 g, carbs 93 g, fat ~5 g) would need ~590 kcal, but only ~233 kcal are left
+    eaten = {"breakfast": {"kcal": 1500, "protein_g": 5, "carbs_g": 50, "fat_g": 50}}
+    t = meal_target(DAILY, eaten, "lunch")["target"]
+    implied = 4 * t["protein_g"] + 4 * t["carbs_g"] + 9 * t["fat_g"]
+    assert implied <= t["kcal"] + 1
+    assert t["kcal"] == pytest.approx(500 * 0.35 / 0.75, abs=0.1)  # calories are not touched
+    assert t["protein_g"] / t["carbs_g"] == pytest.approx(95 / 200, rel=0.05)  # proportions are kept
+
+
+def test_macros_are_left_alone_when_they_already_fit():
+    t = meal_target(DAILY, {}, "lunch")["target"]
+    assert t["protein_g"] == pytest.approx(100 * 0.35, abs=0.1)
+    assert t["carbs_g"] == pytest.approx(250 * 0.35, abs=0.1)
+
+
+def test_everything_is_zero_when_no_calories_are_left():
+    eaten = {"breakfast": {"kcal": 2600, "protein_g": 10, "carbs_g": 10, "fat_g": 10}}
+    t = meal_target(DAILY, eaten, "dinner")["target"]
+    assert t == {"kcal": 0, "protein_g": 0, "carbs_g": 0, "fat_g": 0}
