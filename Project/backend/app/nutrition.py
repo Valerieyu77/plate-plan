@@ -122,6 +122,26 @@ def item_nutrients(item, servings: float) -> dict:
     return {k: servings * (getattr(item, k) or 0) for k in NUTRIENTS}
 
 
+def _fit_macros_to_calories(target: dict) -> dict:
+    """
+    Scale protein/carbs/fat down when together they would need more calories than are left
+    (e.g. 235 kcal left but 120 g protein + 142 g carbs + 41 g fat is impossible to eat).
+    Keeps their proportions, so the three macros always add up to at most the calorie target.
+    """
+    if target["kcal"] <= 0:
+        return {k: 0.0 for k in NUTRIENTS}
+    implied = 4 * target["protein_g"] + 4 * target["carbs_g"] + 9 * target["fat_g"]
+    if implied <= target["kcal"]:
+        return dict(target)
+    factor = target["kcal"] / implied
+    return {
+        "kcal": target["kcal"],
+        "protein_g": target["protein_g"] * factor,
+        "carbs_g": target["carbs_g"] * factor,
+        "fat_g": target["fat_g"] * factor,
+    }
+
+
 def meal_target(daily: dict, consumed_by_meal: dict[str, dict], meal: str) -> dict:
     """
     How much is left to eat at `meal`, given what was already logged today.
@@ -129,9 +149,12 @@ def meal_target(daily: dict, consumed_by_meal: dict[str, dict], meal: str) -> di
     daily:            {kcal, protein_g, carbs_g, fat_g} for the whole day
     consumed_by_meal: {meal name: nutrients eaten at that meal so far today}
 
-    Meals in earlier slots are over, so what they used is subtracted from the day. What is left is
-    shared between this slot and the slots after it, by SLOT_WEIGHT. Anything already eaten at this
-    slot is subtracted again, so a half-logged lunch asks for the rest of lunch.
+    What was eaten at other meals is subtracted from the day. The rest is shared between this
+    meal and every slot of the day that has nothing logged yet, by SLOT_WEIGHT. A slot with no
+    log counts as still to come, because the user may simply not have logged it; so at dinner with
+    nothing logged you get dinner's 40% of the day, not the whole day. Anything already logged at
+    this slot is subtracted again, so a half-logged lunch asks for the rest of lunch. Finally the
+    macros are scaled so they never need more calories than the calorie target.
     Returns {"target": ..., "meal_budget": ..., "consumed_this_meal": ..., "remaining_day": ...}.
     """
     key = meal.strip().lower()
@@ -141,20 +164,24 @@ def meal_target(daily: dict, consumed_by_meal: dict[str, dict], meal: str) -> di
 
     consumed_here = zero_nutrients()
     consumed_other = zero_nutrients()
+    logged_slots = set()  # slots other than this one that have something logged
     for name, nutrients in consumed_by_meal.items():
         other_slot = MEAL_SLOT.get(name.strip().lower())
         if other_slot == slot:
             consumed_here = add_nutrients(consumed_here, nutrients)
         else:
             consumed_other = add_nutrients(consumed_other, nutrients)
+            if other_slot is not None and any(nutrients[k] > 0 for k in NUTRIENTS):
+                logged_slots.add(other_slot)
 
-    later = [s for s in SLOT_WEIGHT if s > slot]
-    share = SLOT_WEIGHT[slot] / (SLOT_WEIGHT[slot] + sum(SLOT_WEIGHT[s] for s in later))
+    pending = [s for s in SLOT_WEIGHT if s == slot or s not in logged_slots]
+    share = SLOT_WEIGHT[slot] / sum(SLOT_WEIGHT[s] for s in pending)
 
     budget, target = {}, {}
     for k in NUTRIENTS:
         budget[k] = max(0.0, daily[k] - consumed_other[k]) * share
         target[k] = max(0.0, budget[k] - consumed_here[k])
+    target = _fit_macros_to_calories(target)
     total_eaten = add_nutrients(consumed_here, consumed_other)
     return {
         "target": {k: round(v, 1) for k, v in target.items()},

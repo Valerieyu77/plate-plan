@@ -96,7 +96,7 @@ The dishes on a menu. With `user_id`, dishes that break that user's allergies or
 Nutrients are per ONE serving.
 
 ### `GET /users/{id}/meal-target?date=&meal=` ✅
-What is left to eat at this meal. The day's target minus what was logged at earlier meals is shared between this meal and the later ones, then what is already logged at this meal is subtracted. This is the target the recommendation step is asked to hit.
+What is left to eat at this meal. What was logged at other meals is subtracted from the day's target; the rest is shared between this meal and every part of the day with nothing logged yet (a meal that wasn't logged counts as still to come, so dinner with nothing logged is about 40% of the day, not all of it); then what is already logged at this meal is subtracted. The macros are scaled down if they would need more calories than are left. This is the target the recommendation step is asked to hit.
 ```json
 {
   "date": "2026-10-08", "meal": "dinner",
@@ -108,7 +108,7 @@ What is left to eat at this meal. The day's target minus what was logged at earl
 }
 ```
 `404` if the user has no goal yet; `422` if `meal` is not breakfast, lunch, light lunch, dinner, kosher lunch or kosher dinner.
-Meal weights: breakfast 0.25, lunch / light lunch 0.35, dinner 0.40 (renormalised over the meals still ahead).
+Meal weights: breakfast 0.25, lunch / light lunch 0.35, dinner 0.40 (renormalised over this meal and the meals with nothing logged yet).
 
 ### `GET /recommendations/meals?user_id=&hall=&date=&meal=` 🟡 (B + D compute, C exposes)
 Recommended dishes for one meal. Returns hard-coded mock data at first.
