@@ -1,6 +1,12 @@
 import os
+from pathlib import Path
 
+from dotenv import load_dotenv
 from sqlmodel import SQLModel, Session, create_engine
+
+# Pick up DATABASE_URL from Project/backend/.env if it exists (gitignored; never commit it).
+# A DATABASE_URL already set in the terminal wins over the file.
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 # Local development uses SQLite. In production set DATABASE_URL to the PostgreSQL URL.
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./nutrition.db")
