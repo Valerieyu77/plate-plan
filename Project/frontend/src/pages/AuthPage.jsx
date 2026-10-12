@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { createUser, getUser } from '../api'
-import { ErrorNote, Field, Input, Select, TagInput } from '../components/ui'
+import { Button, Card, ErrorNote, Field, Input, Segmented, Select, TagInput } from '../components/ui'
 import { ACTIVITY_LEVELS, ALLERGIES, DIETARY_RESTRICTIONS, todayISO } from '../constants'
 import { findAccountByEmail, forgetAccount, getAccounts, rememberAccount, setPrefs } from '../session'
 
@@ -28,57 +28,42 @@ export default function AuthPage({ onSignedIn }) {
   }
 
   return (
-    <section className="grid gap-12 pt-10 pb-24 lg:grid-cols-[1fr_1.1fr] lg:gap-16 lg:pt-16">
-      <div className="lg:sticky lg:top-10 lg:self-start">
-        <p className="font-mono text-[12px] uppercase tracking-[0.18em] text-illini-deep">For UIUC students and staff</p>
-        <h1 className="mt-6 font-serif text-[clamp(2.8rem,6vw,5.6rem)] leading-[0.92] font-medium tracking-[-0.03em]">
-          Know what to eat
-          <br />
-          <em className="font-normal text-illini">before</em> you
-          <br />
-          reach the dining hall.
-        </h1>
-        <p className="mt-8 max-w-xl text-lg leading-relaxed text-ink-soft">
-          Plate Plan reads today's Illinois dining menus and your body stats, sets daily calorie and macro targets for your goal, and
-          shows which dishes fit the meal you're about to eat.
+    <section>
+      <div className="pt-4 pb-6">
+        <p className="text-[13px] font-semibold text-brand">For UIUC students and staff</p>
+        <h1 className="mt-2 text-[2rem] leading-tight font-bold tracking-tight">Know what to eat before you reach the dining hall.</h1>
+        <p className="mt-3 text-muted">
+          Plate Plan reads today's Illinois dining menus, sets calorie and macro targets for your goal, and shows which dishes fit your next meal.
         </p>
-        <ol className="mt-10 max-w-md divide-y divide-rule border-y border-ink">
-          {['Tell us about yourself', 'Pick a goal: lose, maintain or gain', 'Choose a hall and meal, check off what you eat'].map((s, i) => (
-            <li key={s} className="flex gap-4 py-3">
-              <span className="font-mono text-illini">0{i + 1}</span>
-              {s}
+        <ol className="no-scrollbar -mx-4 mt-5 flex gap-2 overflow-x-auto px-4">
+          {['Tell us about yourself', 'Pick a goal', 'Plan each meal'].map((step, i) => (
+            <li key={step} className="flex shrink-0 items-center gap-2 rounded-full bg-surface py-1.5 pr-3.5 pl-1.5 text-sm font-medium ring-1 ring-line">
+              <span className="grid h-6 w-6 place-items-center rounded-full bg-brand-soft text-[12px] font-bold text-brand-deep">{i + 1}</span>
+              {step}
             </li>
           ))}
         </ol>
       </div>
 
-      <div className="border border-ink bg-paper">
-        <div className="grid grid-cols-2 border-b border-ink" role="tablist">
-          {[
+      <Card>
+        <Segmented
+          options={[
             ['signup', 'Sign up'],
             ['login', 'Log in'],
-          ].map(([key, label]) => (
-            <button
-              key={key}
-              role="tab"
-              aria-selected={tab === key}
-              onClick={() => setTab(key)}
-              className={`py-4 font-mono text-[13px] uppercase tracking-wider transition-colors ${
-                tab === key ? 'bg-ink text-paper' : 'hover:bg-paper-deep'
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-        <div className="p-6 md:p-8">
+          ]}
+          value={tab}
+          onChange={setTab}
+        />
+        <div className="mt-5">
           {tab === 'signup' ? (
             <SignUpForm onSignedIn={onSignedIn} onExistingEmail={goToLogin} />
           ) : (
             <LogInForm key={prefillEmail} initialEmail={prefillEmail} onSignedIn={onSignedIn} />
           )}
         </div>
-      </div>
+      </Card>
+
+      <p className="mt-6 text-center text-[13px] text-muted">Menus from UIUC Dining · Built for the University of Illinois Urbana-Champaign</p>
     </section>
   )
 }
@@ -121,15 +106,15 @@ function SignUpForm({ onSignedIn, onExistingEmail }) {
   return (
     <form onSubmit={submit} className="space-y-6">
       <div>
-        <h2 className="font-serif text-3xl font-medium">Create your plan</h2>
-        <p className="mt-1 text-ink-soft">Used to work out your daily calories and to hide dishes you can't eat.</p>
+        <h2 className="text-xl font-bold">Create your plan</h2>
+        <p className="mt-1 text-sm text-muted">Used to work out your daily calories and to hide dishes you can't eat.</p>
       </div>
 
-      <div className="grid gap-5 sm:grid-cols-2">
-        <Field label="Name">
+      <div className="grid grid-cols-2 gap-4">
+        <Field label="Name" className="col-span-2">
           <Input required value={form.name} onChange={set('name')} autoComplete="name" />
         </Field>
-        <Field label="Email">
+        <Field label="Email" className="col-span-2">
           <Input required type="email" value={form.email} onChange={set('email')} autoComplete="email" />
         </Field>
 
@@ -140,16 +125,16 @@ function SignUpForm({ onSignedIn, onExistingEmail }) {
           <div className="flex gap-2">
             <div className="relative flex-1">
               <Input required type="number" inputMode="numeric" min="3" max="8" step="1" value={form.heightFt} onChange={set('heightFt')} aria-label="Height, feet" className="pr-8" />
-              <span className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 font-mono text-sm text-ink-soft">ft</span>
+              <span className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-sm text-muted">ft</span>
             </div>
             <div className="relative flex-1">
               <Input type="number" inputMode="decimal" min="0" max="11.9" step="0.5" value={form.heightIn} onChange={set('heightIn')} aria-label="Height, inches" className="pr-8" />
-              <span className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 font-mono text-sm text-ink-soft">in</span>
+              <span className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-sm text-muted">in</span>
             </div>
           </div>
         </Field>
 
-        <Field label="Sex" hint="Used in the calorie calculation.">
+        <Field label="Sex">
           <Select required value={form.sex} onChange={set('sex')}>
             <option value="" disabled>
               Choose…
@@ -162,7 +147,7 @@ function SignUpForm({ onSignedIn, onExistingEmail }) {
           <Input required type="date" min="1900-01-01" max={todayISO()} value={form.birthdate} onChange={set('birthdate')} />
         </Field>
 
-        <Field label="How often do you exercise?" className="sm:col-span-2">
+        <Field label="How often do you exercise?" className="col-span-2">
           <Select required value={form.activity} onChange={set('activity')}>
             {ACTIVITY_LEVELS.map((a) => (
               <option key={a.value} value={a.value}>
@@ -173,9 +158,9 @@ function SignUpForm({ onSignedIn, onExistingEmail }) {
         </Field>
       </div>
 
-      <div className="space-y-5 border-t border-rule pt-5">
+      <div className="space-y-5 border-t border-line pt-5">
         <div>
-          <label htmlFor="allergies" className="font-mono text-[12px] uppercase tracking-wider text-ink-soft">
+          <label htmlFor="allergies" className="text-[13px] font-semibold text-muted">
             Allergies
           </label>
           <div className="mt-1.5">
@@ -189,7 +174,7 @@ function SignUpForm({ onSignedIn, onExistingEmail }) {
           </div>
         </div>
         <div>
-          <label htmlFor="diet" className="font-mono text-[12px] uppercase tracking-wider text-ink-soft">
+          <label htmlFor="diet" className="text-[13px] font-semibold text-muted">
             Dietary restrictions
           </label>
           <div className="mt-1.5">
@@ -204,9 +189,9 @@ function SignUpForm({ onSignedIn, onExistingEmail }) {
         </div>
       </div>
 
-      <div className="border-t border-rule pt-5">
+      <div className="border-t border-line pt-5">
         <Field label="Target weight (lb, optional)" hint="Shown on your progress chart.">
-          <Input type="number" inputMode="decimal" min="50" max="700" step="0.1" value={form.targetWeight} onChange={set('targetWeight')} className="sm:max-w-[50%]" />
+          <Input type="number" inputMode="decimal" min="50" max="700" step="0.1" value={form.targetWeight} onChange={set('targetWeight')}  />
         </Field>
       </div>
 
@@ -221,12 +206,9 @@ function SignUpForm({ onSignedIn, onExistingEmail }) {
         </ErrorNote>
       )}
 
-      <button
-        disabled={busy}
-        className="w-full bg-ink px-6 py-3.5 text-[15px] font-medium text-paper transition-colors hover:bg-illini disabled:opacity-60"
-      >
+      <Button disabled={busy} className="w-full">
         {busy ? 'Creating your plan…' : 'Sign up'}
-      </button>
+      </Button>
     </form>
   )
 }
@@ -273,25 +255,28 @@ function LogInForm({ initialEmail, onSignedIn }) {
   return (
     <form onSubmit={submit} className="space-y-6">
       <div>
-        <h2 className="font-serif text-3xl font-medium">Welcome back</h2>
-        <p className="mt-1 text-ink-soft">Accounts are remembered in this browser until full login is added.</p>
+        <h2 className="text-xl font-bold">Welcome back</h2>
+        <p className="mt-1 text-sm text-muted">Accounts are remembered in this browser until full login is added.</p>
       </div>
 
       {accounts.length > 0 && (
-        <ul className="divide-y divide-rule border-y border-ink">
+        <ul className="divide-y divide-line overflow-hidden rounded-xl ring-1 ring-line">
           {accounts.map((a) => (
             <li key={a.id}>
               <button
                 type="button"
                 disabled={busy}
                 onClick={() => logIn(a)}
-                className="flex w-full items-center justify-between gap-4 py-3 text-left transition-colors hover:text-illini-deep disabled:opacity-60"
+                className="flex w-full items-center gap-3 px-3.5 py-3 text-left transition-colors hover:bg-bg disabled:opacity-60"
               >
-                <span>
-                  <span className="font-medium">{a.name}</span>
-                  <span className="ml-2 font-mono text-[13px] text-ink-soft">{a.email}</span>
+                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-ink text-sm font-semibold text-white">
+                  {a.name.trim().charAt(0).toUpperCase()}
                 </span>
-                <span className="font-mono text-[12px] uppercase tracking-wider">Continue →</span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate font-medium">{a.name}</span>
+                  <span className="block truncate text-[13px] text-muted">{a.email}</span>
+                </span>
+                <span className="text-sm font-semibold text-brand">Continue</span>
               </button>
             </li>
           ))}
@@ -304,12 +289,9 @@ function LogInForm({ initialEmail, onSignedIn }) {
 
       <ErrorNote>{error}</ErrorNote>
 
-      <button
-        disabled={busy}
-        className="w-full bg-ink px-6 py-3.5 text-[15px] font-medium text-paper transition-colors hover:bg-illini disabled:opacity-60"
-      >
+      <Button disabled={busy} className="w-full">
         {busy ? 'Logging in…' : 'Log in'}
-      </button>
+      </Button>
     </form>
   )
 }

@@ -26,10 +26,11 @@ function useRoute() {
   return route
 }
 
-const NAV = [
-  ['/goal', 'Goal'],
-  ['/plan', 'Plan a meal'],
-  ['/progress', 'Progress'],
+// Bottom tab bar: [path, label, icon path data (24x24, stroked)]
+const TABS = [
+  ['/plan', 'Plan', 'M4 6h16M4 12h16M4 18h10'],
+  ['/progress', 'Progress', 'M12 3a9 9 0 1 0 9 9M12 3v9h9'],
+  ['/goal', 'Goal', 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Zm0-4a5 5 0 1 0 0-10 5 5 0 0 0 0 10Zm0-4a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z'],
 ]
 
 export default function App() {
@@ -80,47 +81,61 @@ export default function App() {
   else if (route === '/progress') page = <ProgressPage user={user} onSetGoal={() => navigate('/goal')} />
   else page = <PlanPage user={user} onSetGoal={() => navigate('/goal')} />
 
+  const inApp = user && !restoring && route !== '/'
+
   return (
-    <div className="min-h-screen">
-      <div className="mx-auto max-w-[1240px] px-4 sm:px-6 md:px-10">
-        <header className="flex flex-wrap items-center justify-between gap-4 border-b border-rule py-6">
-          <a href={user ? '#/plan' : '#/'} className="flex items-center gap-2.5">
-            <span className="grid h-8 w-8 place-items-center bg-illini font-serif text-lg font-semibold text-white">I</span>
-            <span className="font-serif text-xl font-medium tracking-tight">Plate Plan</span>
+    <div className="min-h-dvh">
+      <header className="sticky top-0 z-20 border-b border-line/70 bg-bg/85 backdrop-blur-md">
+        <div className="mx-auto flex h-14 max-w-xl items-center justify-between px-4">
+          <a href={user ? '#/plan' : '#/'} className="flex items-center gap-2">
+            <span className="grid h-8 w-8 place-items-center rounded-lg bg-brand text-base font-bold text-white">P</span>
+            <span className="text-[17px] font-bold tracking-tight">Plate Plan</span>
           </a>
-          {user && (
-            <nav className="flex flex-wrap items-center gap-x-6 gap-y-2 font-mono text-[12px] uppercase tracking-wider">
-              {NAV.map(([path, label]) => (
-                <a
-                  key={path}
-                  href={`#${path}`}
-                  aria-current={route === path ? 'page' : undefined}
-                  className={`transition-colors hover:text-illini-deep ${route === path ? 'text-illini-deep' : 'text-ink-soft'}`}
-                >
-                  {label}
-                </a>
-              ))}
-              <span className="text-ink">{user.name}</span>
-              <button onClick={logOut} className="uppercase text-ink-soft transition-colors hover:text-illini-deep">
+          {inApp && (
+            <div className="flex items-center gap-2">
+              <span className="grid h-8 w-8 place-items-center rounded-full bg-ink text-sm font-semibold text-white" title={user.name}>
+                {user.name.trim().charAt(0).toUpperCase()}
+              </span>
+              <button onClick={logOut} className="rounded-lg px-2 py-1.5 text-sm font-medium text-muted transition-colors hover:text-ink">
                 Log out
               </button>
-            </nav>
+            </div>
           )}
-        </header>
+        </div>
+      </header>
 
+      <main className={`mx-auto max-w-xl px-4 pt-5 ${inApp ? 'pb-[calc(6rem+env(safe-area-inset-bottom))]' : 'pb-12'}`}>
         {restoreError && (
-          <div className="pt-6">
+          <div className="mb-4">
             <ErrorNote>{restoreError}</ErrorNote>
           </div>
         )}
+        {page}
+      </main>
 
-        <main>{page}</main>
-
-        <footer className="flex flex-col justify-between gap-2 border-t border-ink py-8 font-mono text-[12px] uppercase tracking-wider text-ink-soft md:flex-row">
-          <span>Plate Plan · Built for the University of Illinois Urbana-Champaign</span>
-          <span>Menus from UIUC Dining</span>
-        </footer>
-      </div>
+      {inApp && (
+        <nav className="fixed inset-x-0 bottom-0 z-20 border-t border-line bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-md">
+          <div className="mx-auto grid max-w-xl grid-cols-3">
+            {TABS.map(([path, label, icon]) => {
+              // Any unknown route shows the Plan page, so highlight Plan for it too
+              const active = route === path || (path === '/plan' && !TABS.some(([p]) => p === route))
+              return (
+                <a
+                  key={path}
+                  href={`#${path}`}
+                  aria-current={active ? 'page' : undefined}
+                  className={`flex flex-col items-center gap-1 pt-2.5 pb-2 text-[11px] font-semibold transition-colors ${active ? 'text-brand' : 'text-muted hover:text-ink'}`}
+                >
+                  <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d={icon} />
+                  </svg>
+                  {label}
+                </a>
+              )
+            })}
+          </div>
+        </nav>
+      )}
     </div>
   )
 }

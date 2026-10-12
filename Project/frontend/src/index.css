@@ -1,49 +1,46 @@
-@import url('https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400;1,6..72,500&family=Instrument+Sans:wght@400;500;600&family=DM+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 @import 'tailwindcss';
 
 @theme {
-  --color-paper: #f5efe3;
-  --color-paper-deep: #ebe3d1;
+  --color-bg: #f4f5f7;
+  --color-surface: #ffffff;
   --color-ink: #13294b;
-  --color-ink-soft: #4a5a78;
-  --color-illini: #e84a27;
-  --color-illini-deep: #b93616;
-  --color-rule: rgba(19, 41, 75, 0.16);
-  --font-serif: 'Newsreader', Georgia, serif;
-  --font-sans: 'Instrument Sans', system-ui, sans-serif;
-  --font-mono: 'DM Mono', ui-monospace, monospace;
+  --color-muted: #64708a;
+  --color-line: #e3e6ec;
+  --color-brand: #e84a27;
+  --color-brand-deep: #c23a1b;
+  --color-brand-soft: #fdece7;
+  --color-good: #16a34a;
+  --color-bad: #dc2626;
+  --font-sans: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
 }
 
 html {
-  scroll-behavior: smooth;
+  -webkit-tap-highlight-color: transparent;
 }
 
 body {
-  background: var(--color-paper);
+  background: var(--color-bg);
   color: var(--color-ink);
   font-family: var(--font-sans);
+  font-feature-settings: 'tnum' 1;
   -webkit-font-smoothing: antialiased;
-  background-image: radial-gradient(rgba(19, 41, 75, 0.05) 1px, transparent 1px);
-  background-size: 4px 4px;
 }
 
 ::selection {
-  background: var(--color-illini);
+  background: var(--color-brand);
   color: #fff;
 }
 
-* {
+/* Horizontal chip rows scroll without a visible scrollbar */
+.no-scrollbar {
   scrollbar-width: none;
 }
-*::-webkit-scrollbar {
+.no-scrollbar::-webkit-scrollbar {
   display: none;
 }
 
-input[type='range'] {
-  accent-color: var(--color-illini);
-}
-
 :focus-visible {
-  outline: 2px solid var(--color-illini);
+  outline: 2px solid var(--color-brand);
   outline-offset: 2px;
 }

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { addFoodLog, deleteFoodLog, getFoodLogs, getHalls, getMealTarget, getMeals, getMenuItems, getRecommendations } from '../api'
-import { ChoiceChips, ErrorNote, Field, Input, Loading, SectionHead } from '../components/ui'
+import { Button, Card, ChipScroller, DateChip, ErrorNote, Input, Label, Loading, PageHeader, ProgressRing } from '../components/ui'
 import { todayISO } from '../constants'
 import { getPrefs, setPrefs } from '../session'
 
@@ -15,6 +15,9 @@ function defaultMeal(meals) {
 
 // "Ikenberry Dining Center (Ike)" -> "Ike" for the compact buttons; the full name is still what we send
 const shortHall = (hall) => hall.match(/\(([^)]+)\)\s*$/)?.[1] || hall
+
+// "light lunch" -> "Light lunch"
+const mealLabel = (meal) => meal.charAt(0).toUpperCase() + meal.slice(1)
 
 async function loadMealTarget(userId, date, meal) {
   try {
@@ -127,70 +130,71 @@ export default function PlanPage({ user, onSetGoal }) {
   }
 
   return (
-    <section className="pt-10 pb-24">
-      <SectionHead n="02" title="Plan a meal" sub="Pick a dining hall and meal. Dishes that clash with your allergies or diet are already hidden." />
+    <section>
+      <PageHeader title="Plan a meal" sub="Dishes that clash with your allergies or diet are hidden." action={<DateChip value={date} onChange={setDate} />} />
 
-      <div className="mb-10 space-y-6">
-        <Field label="Date" className="max-w-[220px]">
-          <Input type="date" value={date} onChange={(e) => e.target.value && setDate(e.target.value)} />
-        </Field>
-
+      <div className="space-y-4">
         <div>
-          <p className="mb-2 font-mono text-[12px] uppercase tracking-wider text-ink-soft">Dining hall</p>
+          <Label className="mb-2">Dining hall</Label>
           {halls.error ? (
             <ErrorNote>{halls.error.message}</ErrorNote>
           ) : !hallList ? (
             <Loading />
           ) : hallList.length === 0 ? (
-            <p className="text-ink-soft">No menus have been loaded for this date yet. Try another day.</p>
+            <Card className="text-sm text-muted">No menus have been loaded for this date yet. Try another day.</Card>
           ) : (
-            <ChoiceChips options={hallList} value={hall} onChange={pickHall} getLabel={shortHall} />
+            <ChipScroller label="Dining hall" options={hallList} value={hall} onChange={pickHall} getLabel={shortHall} />
           )}
-          {hall && <p className="mt-2 text-sm text-ink-soft">{hall}</p>}
+          {hall && shortHall(hall) !== hall && <p className="mt-1.5 text-[13px] text-muted">{hall}</p>}
         </div>
 
         {hall && (
           <div>
-            <p className="mb-2 font-mono text-[12px] uppercase tracking-wider text-ink-soft">Meal</p>
+            <Label className="mb-2">Meal</Label>
             {meals.error && meals.key === mealsKey ? (
               <ErrorNote>{meals.error.message}</ErrorNote>
             ) : !mealList ? (
               <Loading />
             ) : mealList.length === 0 ? (
-              <p className="text-ink-soft">This hall has no main meals on this date.</p>
+              <Card className="text-sm text-muted">This hall has no main meals on this date.</Card>
             ) : (
-              <ChoiceChips options={mealList} value={meal} onChange={setMealPick} />
+              <ChipScroller label="Meal" options={mealList} value={meal} onChange={setMealPick} getLabel={mealLabel} />
             )}
           </div>
         )}
       </div>
 
-      {menuKey && !current && <Loading>Loading the menu…</Loading>}
-      {current?.error && <ErrorNote>{current.error.message}</ErrorNote>}
+      <div className="mt-6">
+        {menuKey && !current && <Loading>Loading the menu…</Loading>}
+        {current?.error && <ErrorNote>{current.error.message}</ErrorNote>}
+      </div>
 
       {current && !current.error && (
-        <div className="grid gap-10 lg:grid-cols-[1fr_1.4fr]">
-          <div className="space-y-6 self-start">
-            <MealTargetCard target={current.target} meal={meal} onSetGoal={onSetGoal} />
-            {current.rec && <RecommendationCard rec={current.rec} />}
-          </div>
+        <div className="space-y-4">
+          <MealTargetCard target={current.target} meal={meal} onSetGoal={onSetGoal} />
+          {current.rec && <RecommendationCard rec={current.rec} />}
 
-          <div>
-            <div className="mb-4 flex items-end justify-between gap-4">
-              <p className="font-mono text-[12px] uppercase tracking-wider text-ink-soft">
-                {current.items.length} dishes you can eat · {current.items.filter((i) => logByItem.has(i.id)).length} checked
+          <div className="pt-2">
+            <div className="mb-3 flex items-baseline justify-between">
+              <h2 className="text-lg font-bold">Menu</h2>
+              <p className="text-[13px] text-muted">
+                {current.items.length} dishes · {current.items.filter((i) => logByItem.has(i.id)).length} eaten
               </p>
-              <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search dishes" className="max-w-[200px] py-1.5" />
             </div>
-            <ErrorNote>{actionError}</ErrorNote>
+            <Input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search dishes" aria-label="Search dishes" />
+            <div className="mt-3">
+              <ErrorNote>{actionError}</ErrorNote>
+            </div>
             {current.items.length === 0 ? (
-              <p className="border-y border-ink py-6 text-ink-soft">No dishes on this menu fit your allergies and dietary restrictions.</p>
+              <Card className="mt-3 text-sm text-muted">No dishes on this menu fit your allergies and dietary restrictions.</Card>
+            ) : stations.length === 0 ? (
+              <p className="mt-3 text-sm text-muted">No dishes match "{search.trim()}".</p>
             ) : (
-              <div className="space-y-8">
+              <div className="mt-3 space-y-4">
                 {stations.map(([station, items]) => (
                   <div key={station}>
-                    <h3 className="mb-1 font-mono text-[12px] uppercase tracking-wider text-illini-deep">{station}</h3>
-                    <ul className="divide-y divide-rule border-y border-ink">
+                    <Label className="mb-1.5 px-1">{station}</Label>
+                    <ul className="divide-y divide-line overflow-hidden rounded-2xl bg-surface shadow-[0_1px_3px_rgba(19,41,75,0.06)]">
                       {items.map((item) => (
                         <DishRow key={item.id} item={item} checked={logByItem.has(item.id)} busy={pending.has(item.id)} onToggle={() => toggle(item)} />
                       ))}
@@ -210,17 +214,30 @@ function DishRow({ item, checked, busy, onToggle }) {
   const serving = item.serving_size ? `${item.serving_size} ${item.serving_unit || ''}`.trim() : null
   return (
     <li>
-      <label className={`flex cursor-pointer items-center gap-4 py-3 ${busy ? 'opacity-60' : ''}`}>
-        <input type="checkbox" checked={checked} disabled={busy} onChange={onToggle} className="h-5 w-5 shrink-0 accent-illini" />
+      <label className={`flex cursor-pointer items-center gap-3 px-4 py-3 transition-colors active:bg-bg ${busy ? 'opacity-60' : ''}`}>
         <div className="min-w-0 flex-1">
-          <p className={`font-serif text-lg font-medium ${checked ? 'text-illini-deep' : ''}`}>{item.name}</p>
-          <p className="mt-0.5 font-mono text-[12px] text-ink-soft">
-            {fmt(item.kcal)} kcal · {fmt(item.protein_g)}P {fmt(item.carbs_g)}C {fmt(item.fat_g)}F{serving && ` · per ${serving}`}
+          <p className="flex items-center gap-2 font-medium">
+            <span className="truncate">{item.name}</span>
+            {(item.is_vegan || item.is_vegetarian) && (
+              <span className="shrink-0 rounded-full bg-good/10 px-2 py-0.5 text-[11px] font-semibold text-good">{item.is_vegan ? 'Vegan' : 'Veg'}</span>
+            )}
+          </p>
+          <p className="mt-0.5 text-[13px] text-muted">
+            <span className="font-medium text-ink">{fmt(item.kcal)} kcal</span> · {fmt(item.protein_g)}P {fmt(item.carbs_g)}C {fmt(item.fat_g)}F
+            {serving && ` · ${serving}`}
           </p>
         </div>
-        {(item.is_vegan || item.is_vegetarian) && (
-          <span className="border border-rule px-2 py-0.5 font-mono text-[11px] uppercase text-ink-soft">{item.is_vegan ? 'Vegan' : 'Veg'}</span>
-        )}
+        <input type="checkbox" checked={checked} disabled={busy} onChange={onToggle} aria-label={`Ate ${item.name}`} className="peer sr-only" />
+        <span
+          aria-hidden="true"
+          className={`grid h-7 w-7 shrink-0 place-items-center rounded-full border-2 transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-brand/40 ${
+            checked ? 'border-brand bg-brand text-white' : 'border-line text-transparent'
+          }`}
+        >
+          <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+            <path d="m5 12 5 5 9-10" />
+          </svg>
+        </span>
       </label>
     </li>
   )
@@ -229,63 +246,77 @@ function DishRow({ item, checked, busy, onToggle }) {
 function MealTargetCard({ target, meal, onSetGoal }) {
   if (target.missingGoal) {
     return (
-      <div className="border border-ink p-6">
-        <p>Set a goal first so we know how much this meal should be.</p>
-        <button onClick={onSetGoal} className="mt-4 bg-ink px-5 py-3 text-sm font-medium text-paper transition-colors hover:bg-illini">
+      <Card>
+        <p className="font-medium">Set a goal first so we know how much this meal should be.</p>
+        <Button onClick={onSetGoal} className="mt-4 w-full">
           Pick a goal
-        </button>
-      </div>
+        </Button>
+      </Card>
     )
   }
-  const t = target.target
+  const left = target.target
   const eaten = target.consumed_this_meal
+  const budget = target.meal_budget
   return (
-    <div className="border border-ink bg-paper-deep/60 p-6">
-      <p className="font-mono text-[12px] uppercase tracking-wider text-illini-deep">Left for {meal}</p>
-      <div className="mt-3 flex items-end gap-3">
-        <span className="font-serif text-6xl leading-none font-medium">{fmt(t.kcal)}</span>
-        <span className="pb-1 font-mono text-sm text-ink-soft">kcal</span>
-      </div>
-      <p className="mt-3 font-mono text-sm">
-        {fmt(t.protein_g)}g protein · {fmt(t.carbs_g)}g carbs · {fmt(t.fat_g)}g fat
-      </p>
-      {eaten.kcal > 0 && (
-        <p className="mt-3 border-t border-rule pt-3 text-sm text-ink-soft">
-          Already checked at this meal: {fmt(eaten.kcal)} kcal, {fmt(eaten.protein_g)}g protein
+    <Card className="flex items-center gap-5">
+      <ProgressRing value={eaten.kcal} max={budget.kcal} size={120} stroke={11} label={`${fmt(eaten.kcal)} of ${fmt(budget.kcal)} kcal eaten at ${meal}`}>
+        <p className="text-2xl leading-none font-bold">{fmt(left.kcal)}</p>
+        <p className="mt-1 text-[11px] font-medium text-muted">kcal left</p>
+      </ProgressRing>
+      <div className="min-w-0 flex-1">
+        <p className="text-[13px] font-semibold text-brand">{mealLabel(meal)} budget</p>
+        <p className="mt-0.5 text-sm text-muted">
+          {fmt(eaten.kcal)} of {fmt(budget.kcal)} kcal eaten
         </p>
-      )}
-    </div>
+        <dl className="mt-3 grid grid-cols-3 gap-2 text-center">
+          {[
+            ['Protein', left.protein_g],
+            ['Carbs', left.carbs_g],
+            ['Fat', left.fat_g],
+          ].map(([label, value]) => (
+            <div key={label} className="rounded-xl bg-bg py-2">
+              <dd className="text-[15px] font-bold">{fmt(value)}g</dd>
+              <dt className="text-[11px] text-muted">{label}</dt>
+            </div>
+          ))}
+        </dl>
+      </div>
+    </Card>
   )
 }
 
 function RecommendationCard({ rec }) {
   return (
-    <div className="border border-ink bg-ink p-6 text-paper">
+    <Card tone="bg-ink" className="text-white">
       <div className="flex items-center justify-between">
-        <p className="font-mono text-[12px] uppercase tracking-wider text-illini">Recommended</p>
-        {rec.sample && <span className="border border-paper/30 px-2 py-0.5 font-mono text-[11px] uppercase text-paper/70">Sample</span>}
+        <p className="text-[13px] font-semibold text-brand">Recommended for you</p>
+        {rec.sample && <span className="rounded-full bg-white/10 px-2.5 py-0.5 text-[11px] font-semibold text-white/70">Sample</span>}
       </div>
-      <h3 className="mt-3 font-serif text-3xl leading-tight font-medium">Your tray</h3>
-      <ol className="mt-5 space-y-4">
-        {rec.items.map((r, idx) => (
-          <li key={r.item_id ?? r.name} className="flex gap-4 border-t border-paper/20 pt-4">
-            <span className="font-mono text-illini">0{idx + 1}</span>
-            <div>
-              <p className="font-medium">
-                {r.name}
-                {r.servings !== 1 && <span className="ml-2 font-mono text-[12px] text-paper/70">× {r.servings}</span>}
-              </p>
-              <p className="font-mono text-[12px] text-paper/60">
-                {fmt(r.kcal)} kcal · {fmt(r.protein_g)}g protein
-              </p>
-            </div>
-          </li>
-        ))}
-      </ol>
-      <p className="mt-5 border-t border-paper/20 pt-4 font-mono text-sm text-paper/70">
-        {fmt(rec.total.kcal)} kcal · {fmt(rec.total.protein_g)}P {fmt(rec.total.carbs_g)}C {fmt(rec.total.fat_g)}F
-      </p>
-      {rec.note && <p className="mt-3 text-sm text-paper/60">{rec.note}</p>}
-    </div>
+      {rec.items.length > 0 && (
+        <ol className="mt-3 space-y-2">
+          {rec.items.map((r, idx) => (
+            <li key={r.item_id ?? r.name} className="flex items-center gap-3 rounded-xl bg-white/5 px-3 py-2.5">
+              <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-brand text-[12px] font-bold">{idx + 1}</span>
+              <div className="min-w-0 flex-1">
+                <p className="truncate font-medium">
+                  {r.name}
+                  {r.servings !== 1 && <span className="ml-1.5 text-[13px] text-white/60">× {r.servings}</span>}
+                </p>
+                <p className="text-[12px] text-white/60">
+                  {fmt(r.kcal)} kcal · {fmt(r.protein_g)}g protein
+                </p>
+              </div>
+            </li>
+          ))}
+        </ol>
+      )}
+      {rec.items.length > 0 && (
+        <p className="mt-3 text-sm text-white/70">
+          Total <span className="font-semibold text-white">{fmt(rec.total.kcal)} kcal</span> · {fmt(rec.total.protein_g)}P {fmt(rec.total.carbs_g)}C{' '}
+          {fmt(rec.total.fat_g)}F
+        </p>
+      )}
+      {rec.note && <p className="mt-2 text-[13px] text-white/60">{rec.note}</p>}
+    </Card>
   )
 }

@@ -1,14 +1,13 @@
 import { useEffect, useState } from 'react'
 import { addWeightLog, getProgress } from '../api'
-import { Bar, ErrorNote, Field, Input, Loading, SectionHead } from '../components/ui'
+import { Bar, Button, Card, DateChip, ErrorNote, Field, Input, Label, Loading, PageHeader, ProgressRing } from '../components/ui'
 import { todayISO } from '../constants'
 import { getPrefs } from '../session'
 
-const NUTRIENTS = [
-  ['kcal', 'Calories', ''],
-  ['protein_g', 'Protein', 'g'],
-  ['carbs_g', 'Carbs', 'g'],
-  ['fat_g', 'Fat', 'g'],
+const MACROS = [
+  ['protein_g', 'Protein', 'bg-ink'],
+  ['carbs_g', 'Carbs', 'bg-brand'],
+  ['fat_g', 'Fat', 'bg-muted'],
 ]
 
 async function loadProgress(userId, date) {
@@ -57,53 +56,59 @@ export default function ProgressPage({ user, onSetGoal }) {
   }
 
   return (
-    <section className="pt-10 pb-24">
-      <SectionHead n="03" title="Progress" sub="What you've checked off against your daily targets, and how your weight is moving." />
-
-      <Field label="Date" className="mb-10 max-w-[220px]">
-        <Input type="date" value={date} onChange={(e) => e.target.value && setDate(e.target.value)} />
-      </Field>
+    <section>
+      <PageHeader title="Progress" sub="Today's food against your targets, and your weight trend." action={<DateChip value={date} onChange={setDate} />} />
 
       {!current && <Loading />}
       {current?.error && <ErrorNote>{current.error.message}</ErrorNote>}
       {progress?.missingGoal && (
-        <div className="border border-ink p-6">
-          <p>Set a goal first to see your targets.</p>
-          <button onClick={onSetGoal} className="mt-4 bg-ink px-5 py-3 text-sm font-medium text-paper transition-colors hover:bg-illini">
+        <Card>
+          <p className="font-medium">Set a goal first to see your targets.</p>
+          <Button onClick={onSetGoal} className="mt-4 w-full">
             Pick a goal
-          </button>
-        </div>
+          </Button>
+        </Card>
       )}
 
       {progress && !progress.missingGoal && (
-        <div className="grid gap-16 lg:grid-cols-2">
-          <div>
-            <div className="flex items-end gap-4">
-              <span className="font-serif text-8xl leading-none font-medium tracking-tight">{Math.round(progress.actual.kcal)}</span>
-              <span className="pb-3 font-mono text-sm text-ink-soft">
-                of {Math.round(progress.target.kcal)} kcal
-                <br />
-                <span className={progress.over.kcal > 0 ? 'text-illini-deep' : ''}>
-                  {progress.over.kcal > 0 ? `${Math.round(progress.over.kcal)} over` : `${Math.round(progress.remaining.kcal)} left`}
-                </span>
-              </span>
-            </div>
-            <div className="mt-8 space-y-5">
-              {NUTRIENTS.map(([key, label, unit]) => (
-                <Bar key={key} label={label} value={progress.actual[key]} max={progress.target[key]} unit={unit} strong={key === 'kcal'} />
+        <div className="space-y-4">
+          <Card className="flex flex-col items-center pt-6">
+            <ProgressRing
+              value={progress.actual.kcal}
+              max={progress.target.kcal}
+              size={200}
+              stroke={16}
+              label={`${Math.round(progress.actual.kcal)} of ${Math.round(progress.target.kcal)} kcal eaten`}
+            >
+              <p className="text-4xl leading-none font-bold tracking-tight">{Math.round(progress.actual.kcal)}</p>
+              <p className="mt-1 text-[13px] text-muted">of {Math.round(progress.target.kcal)} kcal</p>
+            </ProgressRing>
+            <p className={`mt-4 rounded-full px-3 py-1 text-sm font-semibold ${progress.over.kcal > 0 ? 'bg-bad/10 text-bad' : 'bg-good/10 text-good'}`}>
+              {progress.over.kcal > 0 ? `${Math.round(progress.over.kcal)} kcal over` : `${Math.round(progress.remaining.kcal)} kcal left`}
+            </p>
+            <div className="mt-6 w-full space-y-4">
+              {MACROS.map(([key, label, color]) => (
+                <Bar key={key} label={label} value={progress.actual[key]} max={progress.target[key]} unit="g" color={color} />
               ))}
             </div>
-          </div>
+          </Card>
 
-          <div>
-            <p className="font-mono text-[12px] uppercase tracking-wider text-ink-soft">Weight (lb)</p>
+          <Card>
+            <div className="flex items-baseline justify-between">
+              <h2 className="text-lg font-bold">Weight</h2>
+              {progress.weight_trend.length > 0 && (
+                <p className="text-sm text-muted">
+                  Latest <span className="font-semibold text-ink">{progress.weight_trend.at(-1).weight_lbs} lb</span>
+                </p>
+              )}
+            </div>
             <WeightChart points={progress.weight_trend} target={targetWeight} />
 
-            <form onSubmit={saveWeight} className="mt-6 flex flex-wrap items-end gap-2">
-              <Field label="Weigh-in date" className="w-[170px]">
+            <form onSubmit={saveWeight} className="mt-4 grid grid-cols-2 gap-3">
+              <Field label="Date">
                 <Input type="date" required max={todayISO()} value={weighIn.date} onChange={(e) => setWeighIn((w) => ({ ...w, date: e.target.value }))} />
               </Field>
-              <Field label="Weight (lb)" className="w-[120px]">
+              <Field label="Weight (lb)">
                 <Input
                   type="number"
                   required
@@ -115,25 +120,28 @@ export default function ProgressPage({ user, onSetGoal }) {
                   onChange={(e) => setWeighIn((w) => ({ ...w, weight: e.target.value }))}
                 />
               </Field>
-              <button disabled={saving} className="bg-ink px-5 py-2.5 font-medium text-paper transition-colors hover:bg-illini disabled:opacity-60">
+              <Button disabled={saving} variant="dark" className="col-span-2">
                 {saving ? 'Saving…' : 'Log weight'}
-              </button>
+              </Button>
             </form>
             <div className="mt-3">
               <ErrorNote>{saveError}</ErrorNote>
             </div>
 
             {progress.weight_trend.length > 0 && (
-              <ul className="mt-6 divide-y divide-rule border-y border-ink font-mono text-sm">
-                {[...progress.weight_trend].reverse().slice(0, 7).map((w, i) => (
-                  <li key={`${w.date}-${i}`} className="flex justify-between py-2">
-                    <span className="text-ink-soft">{w.date}</span>
-                    <span>{w.weight_lbs} lb</span>
-                  </li>
-                ))}
-              </ul>
+              <div className="mt-4">
+                <Label className="mb-1">Recent weigh-ins</Label>
+                <ul className="divide-y divide-line text-sm">
+                  {[...progress.weight_trend].reverse().slice(0, 7).map((w, i) => (
+                    <li key={`${w.date}-${i}`} className="flex justify-between py-2.5">
+                      <span className="text-muted">{w.date}</span>
+                      <span className="font-semibold">{w.weight_lbs} lb</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
             )}
-          </div>
+          </Card>
         </div>
       )}
     </section>
@@ -144,7 +152,7 @@ export default function ProgressPage({ user, onSetGoal }) {
 function WeightChart({ points, target }) {
   const [hover, setHover] = useState(null)
   if (points.length === 0) {
-    return <p className="mt-3 border-y border-ink py-10 text-center text-ink-soft">No weigh-ins yet. Log one below to start your trend.</p>
+    return <p className="mt-3 rounded-xl bg-bg py-8 text-center text-sm text-muted">No weigh-ins yet. Log one below to start your trend.</p>
   }
 
   const W = 520
@@ -179,53 +187,53 @@ function WeightChart({ points, target }) {
         className="w-full"
         role="img"
         aria-label={`Weight trend, ${points.length} weigh-ins, latest ${points.at(-1).weight_lbs} lb`}
-        onMouseMove={onMove}
-        onMouseLeave={() => setHover(null)}
+        onPointerMove={onMove}
+        onPointerLeave={() => setHover(null)}
       >
         {ticks.map((t) => (
           <g key={t}>
-            <line x1={pad.left} x2={W - pad.right} y1={y(t)} y2={y(t)} stroke="var(--color-rule)" strokeWidth="1" />
-            <text x={pad.left - 8} y={y(t)} dy="0.32em" textAnchor="end" className="fill-ink-soft font-mono text-[11px]">
+            <line x1={pad.left} x2={W - pad.right} y1={y(t)} y2={y(t)} stroke="var(--color-line)" strokeWidth="1" />
+            <text x={pad.left - 8} y={y(t)} dy="0.32em" textAnchor="end" className="fill-muted text-[11px]">
               {t}
             </text>
           </g>
         ))}
-        <text x={pad.left} y={H - 6} className="fill-ink-soft font-mono text-[11px]">
+        <text x={pad.left} y={H - 6} className="fill-muted text-[11px]">
           {points[0].date}
         </text>
         {points.length > 1 && (
-          <text x={W - pad.right} y={H - 6} textAnchor="end" className="fill-ink-soft font-mono text-[11px]">
+          <text x={W - pad.right} y={H - 6} textAnchor="end" className="fill-muted text-[11px]">
             {points.at(-1).date}
           </text>
         )}
 
         {target && (
           <g>
-            <line x1={pad.left} x2={W - pad.right} y1={y(target)} y2={y(target)} stroke="var(--color-illini)" strokeWidth="1.5" strokeDasharray="5 4" />
-            <text x={W - pad.right} y={y(target) - 6} textAnchor="end" className="fill-ink font-mono text-[11px]">
+            <line x1={pad.left} x2={W - pad.right} y1={y(target)} y2={y(target)} stroke="var(--color-brand)" strokeWidth="1.5" strokeDasharray="5 4" />
+            <text x={W - pad.right} y={y(target) - 6} textAnchor="end" className="fill-brand-deep text-[11px] font-semibold">
               Target {target}
             </text>
           </g>
         )}
 
-        {active && <line x1={active.cx} x2={active.cx} y1={pad.top} y2={H - pad.bottom} stroke="var(--color-ink-soft)" strokeWidth="1" />}
+        {active && <line x1={active.cx} x2={active.cx} y1={pad.top} y2={H - pad.bottom} stroke="var(--color-muted)" strokeWidth="1" />}
         {coords.length > 1 && (
           <polyline
             points={coords.map((c) => `${c.cx},${c.cy}`).join(' ')}
             fill="none"
             stroke="var(--color-ink)"
-            strokeWidth="2"
+            strokeWidth="2.5"
             strokeLinejoin="round"
             strokeLinecap="round"
           />
         )}
         {coords.map((c, i) => (
-          <circle key={i} cx={c.cx} cy={c.cy} r={hover === i ? 5 : 4} fill="var(--color-ink)" stroke="var(--color-paper)" strokeWidth="2" />
+          <circle key={i} cx={c.cx} cy={c.cy} r={hover === i ? 5 : 4} fill="var(--color-ink)" stroke="var(--color-surface)" strokeWidth="2" />
         ))}
       </svg>
       {active && (
         <div
-          className="pointer-events-none absolute -translate-x-1/2 -translate-y-full border border-ink bg-paper px-2 py-1 font-mono text-[12px] whitespace-nowrap"
+          className="pointer-events-none absolute -translate-x-1/2 -translate-y-full rounded-lg bg-ink px-2.5 py-1 text-[12px] font-medium whitespace-nowrap text-white shadow-lg"
           style={{ left: `${(active.cx / W) * 100}%`, top: `${(active.cy / H) * 100}%`, marginTop: -10 }}
         >
           {active.date} · {active.weight_lbs} lb

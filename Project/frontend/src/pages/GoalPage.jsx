@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { getGoal, setGoal } from '../api'
-import { ErrorNote, SectionHead } from '../components/ui'
+import { Button, Card, ErrorNote, Label, PageHeader } from '../components/ui'
 import { GOALS } from '../constants'
 import { getPrefs, setPrefs } from '../session'
 
@@ -41,21 +41,17 @@ export default function GoalPage({ user, onContinue }) {
   }
 
   return (
-    <section className="pt-10 pb-24">
-      <SectionHead
-        n="01"
-        title="Pick your goal"
-        sub="We use your height, weight, age, sex and activity level to set daily calorie and macro targets."
-      />
+    <section>
+      <PageHeader title="Your goal" sub="Your height, weight, age, sex and activity set your daily calorie and macro targets." />
 
       {suggestion && !goalType && (
-        <p className="mb-6 text-ink-soft">
+        <Card tone="bg-brand-soft" className="mb-4 text-sm">
           Your target weight is {prefs.targetWeight} lb and you weigh {user.weight_lbs} lb, so{' '}
-          <span className="font-medium text-ink">{GOALS[suggestion].label.toLowerCase()}</span> fits best.
-        </p>
+          <span className="font-semibold">{GOALS[suggestion].label.toLowerCase()}</span> fits best.
+        </Card>
       )}
 
-      <div className="grid gap-px border border-ink bg-ink md:grid-cols-3">
+      <div className="space-y-3">
         {Object.keys(GOALS).map((g) => {
           const selected = goalType === g
           return (
@@ -64,49 +60,59 @@ export default function GoalPage({ user, onContinue }) {
               onClick={() => choose(g)}
               disabled={busy !== null}
               aria-pressed={selected}
-              className={`p-6 text-left transition-colors disabled:cursor-wait ${selected ? 'bg-ink text-paper' : 'bg-paper hover:bg-paper-deep'}`}
+              className={`flex w-full items-center gap-4 rounded-2xl bg-surface p-4 text-left shadow-[0_1px_3px_rgba(19,41,75,0.06)] ring-2 transition disabled:cursor-wait ${
+                selected ? 'ring-brand' : 'ring-transparent hover:ring-line'
+              }`}
             >
-              <div className="flex items-center justify-between">
-                <span className="font-serif text-2xl font-medium">{GOALS[g].label}</span>
-                <span className={`font-mono text-[11px] uppercase tracking-wider ${selected ? 'text-illini' : 'text-ink-soft'}`}>
-                  {busy === g ? 'Saving…' : selected ? '● Your goal' : suggestion === g ? 'Suggested' : 'Select'}
-                </span>
+              <div className="min-w-0 flex-1">
+                <p className="flex items-center gap-2 text-[17px] font-semibold">
+                  {GOALS[g].label}
+                  {suggestion === g && !selected && <span className="rounded-full bg-brand-soft px-2 py-0.5 text-[11px] font-semibold text-brand-deep">Suggested</span>}
+                </p>
+                <p className="mt-0.5 text-sm text-muted">{busy === g ? 'Saving…' : GOALS[g].note}</p>
               </div>
-              <p className={`mt-1 text-sm ${selected ? 'text-paper/70' : 'text-ink-soft'}`}>{GOALS[g].note}</p>
+              <span
+                aria-hidden="true"
+                className={`grid h-6 w-6 shrink-0 place-items-center rounded-full border-2 ${selected ? 'border-brand bg-brand text-white' : 'border-line'}`}
+              >
+                {selected && (
+                  <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="m5 12 5 5 9-10" />
+                  </svg>
+                )}
+              </span>
             </button>
           )
         })}
       </div>
 
-      <div className="mt-6 space-y-4">
+      <div className="mt-4 space-y-3">
         <ErrorNote>{error}</ErrorNote>
         {goal?.warning && <ErrorNote>{goal.warning}</ErrorNote>}
       </div>
 
       {goal && (
-        <div className="mt-10 grid gap-10 lg:grid-cols-[1fr_auto] lg:items-end">
-          <div>
-            <p className="font-mono text-[12px] uppercase tracking-wider text-ink-soft">Your daily targets</p>
-            <div className="mt-4 grid grid-cols-2 gap-px border border-ink bg-ink sm:grid-cols-4">
-              {[
-                ['Calories', goal.calorie_goal, 'kcal', true],
-                ['Protein', goal.protein_goal_g, 'g'],
-                ['Carbs', goal.carb_goal_g, 'g'],
-                ['Fat', goal.fat_goal_g, 'g'],
-              ].map(([label, value, unit, hi]) => (
-                <div key={label} className={`p-5 ${hi ? 'bg-illini text-white' : 'bg-paper'}`}>
-                  <p className={`font-mono text-[12px] uppercase tracking-wider ${hi ? 'text-white/80' : 'text-ink-soft'}`}>{label}</p>
-                  <p className="mt-4 font-serif text-5xl leading-none font-medium">
-                    {value ?? '—'}
-                    <span className="ml-1 font-mono text-base">{unit}</span>
-                  </p>
-                </div>
-              ))}
-            </div>
+        <div className="mt-6">
+          <Label className="mb-2">Your daily targets</Label>
+          <div className="grid grid-cols-2 gap-3">
+            {[
+              ['Calories', goal.calorie_goal, 'kcal', true],
+              ['Protein', goal.protein_goal_g, 'g'],
+              ['Carbs', goal.carb_goal_g, 'g'],
+              ['Fat', goal.fat_goal_g, 'g'],
+            ].map(([label, value, unit, hi]) => (
+              <Card key={label} tone={hi ? 'bg-brand' : undefined} className={hi ? 'text-white' : ''}>
+                <p className={`text-[13px] font-semibold ${hi ? 'text-white/80' : 'text-muted'}`}>{label}</p>
+                <p className="mt-2 text-3xl leading-none font-bold tracking-tight">
+                  {value ?? '—'}
+                  <span className={`ml-1 text-sm font-medium ${hi ? 'text-white/80' : 'text-muted'}`}>{unit}</span>
+                </p>
+              </Card>
+            ))}
           </div>
-          <button onClick={onContinue} className="bg-ink px-6 py-3.5 text-[15px] font-medium text-paper transition-colors hover:bg-illini">
-            Plan my next meal →
-          </button>
+          <Button onClick={onContinue} variant="dark" className="mt-5 w-full">
+            Plan my next meal
+          </Button>
         </div>
       )}
     </section>
