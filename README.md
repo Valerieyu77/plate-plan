@@ -29,7 +29,7 @@ UIUC EatSmart menus  ->  scraper  ->  PostgreSQL (Neon)  <->  FastAPI backend  <
 
 | Part | Folder | What it is |
 |---|---|---|
-| Frontend | `Frontend/my-react-app` | React + Vite app (Plate Plan design) |
+| Frontend | `Project/frontend` | React + Vite app (Plate Plan design) |
 | Backend API | `Project/backend/app` | FastAPI + SQLModel |
 | Menu scraper | `Project/backend/scraper` | Collects dining hall menus and nutrition into the database |
 | Tests | `Project/backend/tests` | pytest |
@@ -56,7 +56,7 @@ Then open http://127.0.0.1:8000/docs for the interactive API page.
 ### Frontend
 
 ```sh
-cd Frontend/my-react-app
+cd Project/frontend
 npm install
 npm run dev
 ```

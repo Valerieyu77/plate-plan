@@ -3,9 +3,9 @@
 From the repository root, run:
 
 ```sh
-cd Frontend/my-react-app
+cd Project/frontend
 npm install
 npm run dev
 ```
 
-To create a production build, run `npm run build` from `Frontend/my-react-app`.
+To create a production build, run `npm run build` from `Project/frontend`.
