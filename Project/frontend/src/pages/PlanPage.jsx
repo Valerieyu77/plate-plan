@@ -10,6 +10,10 @@ const fmt = (n) => (n == null ? '—' : Math.round(n))
 const SMALL_KCAL = 20
 const isSmall = (item) => item.kcal != null && item.kcal < SMALL_KCAL
 
+// Servings move in half steps
+const SERVING_STEP = 0.5
+const MAX_SERVINGS = 5
+
 // Pre-select the meal that fits the time of day, if the hall serves it
 function defaultMeal(meals) {
   const hour = new Date().getHours()
@@ -95,8 +99,8 @@ export default function PlanPage({ user, onSetGoal }) {
   }, [menuKey, hall, date, meal, user.id])
   const current = menuKey && menu.key === menuKey ? menu : null
 
-  // item id -> food log id, so a checked dish can be un-checked
-  const logByItem = useMemo(() => new Map((current?.logs || []).map((l) => [l.item_id, l.id])), [current?.logs])
+  // item id -> food log, so a checked dish can be un-checked or have its servings changed
+  const logByItem = useMemo(() => new Map((current?.logs || []).map((l) => [l.item_id, l])), [current?.logs])
 
   // What's checked on this menu, for the sticky bar
   const checkedTotal = useMemo(() => {
@@ -142,17 +146,21 @@ export default function PlanPage({ user, onSetGoal }) {
     setPrefs(user.id, { hall: h })
   }
 
-  const toggle = async (item) => {
-    const logId = logByItem.get(item.id)
+  // Log `servings` of a dish (0 removes it). The API can't edit a log, so a new amount replaces the old log.
+  const logServings = async (item, servings) => {
+    const log = logByItem.get(item.id)
     setActionError('')
     setPending((p) => new Set(p).add(item.id))
     try {
-      if (logId) await deleteFoodLog(user.id, logId)
-      else await addFoodLog(user.id, item.id, 1)
-      // Logging changes what's left for this meal, so reload both
-      const [logs, target] = await Promise.all([getFoodLogs(user.id, date), loadMealTarget(user.id, date, meal)])
-      setMenu((m) => (m.key === menuKey ? { ...m, logs, target } : m))
-      showFlash(logId ? `Removed ${item.name}` : `Logged ${item.name}`)
+      try {
+        if (log) await deleteFoodLog(user.id, log.id)
+        if (servings > 0) await addFoodLog(user.id, item.id, servings)
+      } finally {
+        // Logging changes what's left for this meal, so reload both (also after a half-done change)
+        const [logs, target] = await Promise.all([getFoodLogs(user.id, date), loadMealTarget(user.id, date, meal)])
+        setMenu((m) => (m.key === menuKey ? { ...m, logs, target } : m))
+      }
+      showFlash(servings === 0 ? `Removed ${item.name}` : log ? `${item.name}: ${servings}× logged` : `Logged ${item.name}`)
     } catch (err) {
       setActionError(err.message)
     } finally {
@@ -241,7 +249,13 @@ export default function PlanPage({ user, onSetGoal }) {
                     <Label className="mb-1.5 px-1">{station}</Label>
                     <ul className="divide-y divide-line overflow-hidden rounded-2xl bg-surface shadow-[0_1px_3px_rgba(19,41,75,0.06)]">
                       {items.map((item) => (
-                        <DishRow key={item.id} item={item} checked={logByItem.has(item.id)} busy={pending.has(item.id)} onToggle={() => toggle(item)} />
+                        <DishRow
+                          key={item.id}
+                          item={item}
+                          servings={logByItem.get(item.id)?.servings || 0}
+                          busy={pending.has(item.id)}
+                          onServings={(n) => logServings(item, n)}
+                        />
                       ))}
                     </ul>
                   </div>
@@ -257,11 +271,12 @@ export default function PlanPage({ user, onSetGoal }) {
   )
 }
 
-function DishRow({ item, checked, busy, onToggle }) {
+function DishRow({ item, servings, busy, onServings }) {
+  const checked = servings > 0
   const serving = item.serving_size ? `${item.serving_size} ${item.serving_unit || ''}`.trim() : null
   return (
-    <li>
-      <label className={`flex cursor-pointer items-center gap-3 px-4 py-3 transition-colors active:bg-bg ${busy ? 'opacity-60' : ''}`}>
+    <li className={`flex items-center gap-2 pr-4 transition-colors ${busy ? 'opacity-60' : ''}`}>
+      <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 py-3 pl-4 active:bg-bg">
         <div className="min-w-0 flex-1">
           <p className="flex items-center gap-2 font-medium">
             <span className="truncate">{item.name}</span>
@@ -274,19 +289,46 @@ function DishRow({ item, checked, busy, onToggle }) {
             {serving && ` · ${serving}`}
           </p>
         </div>
-        <input type="checkbox" checked={checked} disabled={busy} onChange={onToggle} aria-label={`Ate ${item.name}`} className="peer sr-only" />
-        <span
-          aria-hidden="true"
-          className={`grid h-7 w-7 shrink-0 place-items-center rounded-full border-2 transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-brand/40 ${
-            checked ? 'border-brand bg-brand text-white' : 'border-line text-transparent'
-          }`}
-        >
-          <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-            <path d="m5 12 5 5 9-10" />
-          </svg>
-        </span>
+        <input type="checkbox" checked={checked} disabled={busy} onChange={() => onServings(checked ? 0 : 1)} aria-label={`Ate ${item.name}`} className="peer sr-only" />
+        {!checked && (
+          <span
+            aria-hidden="true"
+            className="grid h-7 w-7 shrink-0 place-items-center rounded-full border-2 border-line text-transparent transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-brand/40"
+          />
+        )}
       </label>
+      {checked && <ServingStepper name={item.name} servings={servings} busy={busy} onChange={onServings} />}
     </li>
+  )
+}
+
+// − 1.5 + : at the lowest step, − removes the dish
+function ServingStepper({ name, servings, busy, onChange }) {
+  const btn = 'grid h-7 w-7 place-items-center rounded-full text-lg leading-none font-semibold transition-colors disabled:opacity-40'
+  return (
+    <div className="flex shrink-0 items-center gap-1 rounded-full bg-brand-soft p-0.5" role="group" aria-label={`Servings of ${name}`}>
+      <button
+        type="button"
+        disabled={busy}
+        onClick={() => onChange(servings - SERVING_STEP)}
+        aria-label={servings <= SERVING_STEP ? `Remove ${name}` : `Fewer servings of ${name}`}
+        className={`${btn} text-brand active:bg-brand/10`}
+      >
+        −
+      </button>
+      <span className="min-w-8 text-center text-sm font-bold text-brand-deep" aria-live="polite">
+        {servings}×
+      </span>
+      <button
+        type="button"
+        disabled={busy || servings >= MAX_SERVINGS}
+        onClick={() => onChange(servings + SERVING_STEP)}
+        aria-label={`More servings of ${name}`}
+        className={`${btn} bg-brand text-white active:bg-brand-deep`}
+      >
+        +
+      </button>
+    </div>
   )
 }
 
