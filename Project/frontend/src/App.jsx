@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { getGoal, getUser } from './api'
+import { getGoal, getUser, onWaking } from './api'
 import { ErrorNote, Loading } from './components/ui'
 import AuthPage from './pages/AuthPage'
 import GoalPage from './pages/GoalPage'
@@ -38,6 +38,9 @@ export default function App() {
   const [user, setUser] = useState(null)
   const [restoring, setRestoring] = useState(() => getUserId() !== null)
   const [restoreError, setRestoreError] = useState('')
+  const [waking, setWaking] = useState(false)
+
+  useEffect(() => onWaking(setWaking), [])
 
   // Reload the signed-in user from the id saved in localStorage
   useEffect(() => {
@@ -102,6 +105,12 @@ export default function App() {
             </div>
           )}
         </div>
+        {waking && (
+          <p role="status" className="flex items-center justify-center gap-2 bg-brand-soft px-4 py-2 text-[13px] font-medium text-brand-deep">
+            <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-brand/30 border-t-brand" aria-hidden="true" />
+            Server is waking up, please wait…
+          </p>
+        )}
       </header>
 
       <main className={`mx-auto max-w-xl px-4 pt-5 ${inApp ? 'pb-[calc(6rem+env(safe-area-inset-bottom))]' : 'pb-12'}`}>
