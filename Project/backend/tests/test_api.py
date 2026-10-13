@@ -118,8 +118,11 @@ def test_halls_with_main_meals_come_first(client):
     # "57 North" sorts before ISR alphabetically but only sells retail items, so it goes last
     session.add(MenuItem(source_id="r1", date=date(2026, 10, 8), hall="57 North", meal="retail", name="Latte",
                          kcal=190, protein_g=10, carbs_g=19, fat_g=7, allergens=["Milk"], is_recommendable=False))
+    # "Everybody Eats" serves main meals but isn't a full dining center, so it goes after ISR
+    session.add(MenuItem(source_id="e1", date=date(2026, 10, 8), hall="Everybody Eats", meal="lunch", name="Wrap",
+                         kcal=450, protein_g=20, carbs_g=50, fat_g=15, allergens=[], is_recommendable=True))
     session.commit()
-    assert client.get("/halls", params={"date": DAY}).json() == [ISR, "57 North"]
+    assert client.get("/halls", params={"date": DAY}).json() == [ISR, "Everybody Eats", "57 North"]
 
 
 def test_menu_items_skip_side_menus_by_default(client):

@@ -141,8 +141,9 @@ def read_goal(user_id: int, session: SessionDep):
 def list_halls(session: SessionDep, date: date | None = None):
     """Halls that have menu data (on `date`, if given), for the hall dropdown.
 
-    Halls that serve main meals come first, retail shops (57 North, Caffeinator, ...) last,
-    so the first hall is a sensible default.
+    Order: the big dining centers (Ike, ISR, LAR, PAR), then other halls with main meals
+    (Everybody Eats, Kosher Kitchen), then retail shops (57 North, Caffeinator, ...), so the
+    first hall is a sensible default.
     """
     query = select(MenuItem.hall, MenuItem.is_recommendable).distinct()
     if date:
@@ -150,7 +151,12 @@ def list_halls(session: SessionDep, date: date | None = None):
     rows = session.exec(query).all()
     halls = {hall for hall, _ in rows}
     with_main_meals = {hall for hall, recommendable in rows if recommendable}
-    return sorted(halls, key=lambda h: (h not in with_main_meals, h))
+    def rank(hall):
+        if hall not in with_main_meals:
+            return 2
+        return 0 if "Dining" in hall else 1
+
+    return sorted(halls, key=lambda h: (rank(h), h))
 
 
 @app.get("/menu-items", response_model=list[MenuItemPublic])
