@@ -78,7 +78,10 @@ export default function PlanPage({ user, onSetGoal }) {
       getFoodLogs(user.id, date),
     ])
       .then(async ([items, target, logs]) => {
-        const rec = target.missingGoal ? null : await getRecommendations({ userId: user.id, hall, date, meal, target: target.target })
+        // A failed recommendation shouldn't hide the menu; the card shows the error instead
+        const rec = target.missingGoal
+          ? null
+          : await getRecommendations({ userId: user.id, hall, date, meal }).catch((error) => ({ error }))
         if (!ignore) setMenu({ key: menuKey, items, target, logs, rec })
       })
       .catch((error) => !ignore && setMenu({ key: menuKey, error }))
@@ -288,11 +291,9 @@ function MealTargetCard({ target, meal, onSetGoal }) {
 function RecommendationCard({ rec }) {
   return (
     <Card tone="bg-ink" className="text-white">
-      <div className="flex items-center justify-between">
-        <p className="text-[13px] font-semibold text-brand">Recommended for you</p>
-        {rec.sample && <span className="rounded-full bg-white/10 px-2.5 py-0.5 text-[11px] font-semibold text-white/70">Sample</span>}
-      </div>
-      {rec.items.length > 0 && (
+      <p className="text-[13px] font-semibold text-brand">Recommended for you</p>
+      {rec.error && <p className="mt-2 text-sm text-white/70">Couldn't load recommendations: {rec.error.message}</p>}
+      {rec.items?.length > 0 && (
         <ol className="mt-3 space-y-2">
           {rec.items.map((r, idx) => (
             <li key={r.item_id ?? r.name} className="flex items-center gap-3 rounded-xl bg-white/5 px-3 py-2.5">
@@ -310,7 +311,7 @@ function RecommendationCard({ rec }) {
           ))}
         </ol>
       )}
-      {rec.items.length > 0 && (
+      {rec.items?.length > 0 && (
         <p className="mt-3 text-sm text-white/70">
           Total <span className="font-semibold text-white">{fmt(rec.total.kcal)} kcal</span> · {fmt(rec.total.protein_g)}P {fmt(rec.total.carbs_g)}C{' '}
           {fmt(rec.total.fat_g)}F
