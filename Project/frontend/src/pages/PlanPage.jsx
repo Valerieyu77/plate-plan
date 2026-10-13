@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { addFoodLog, deleteFoodLog, getFoodLogs, getHalls, getMealTarget, getMeals, getMenuItems, getRecommendations } from '../api'
 import { Button, Card, ChipScroller, DateChip, ErrorNote, Input, Label, Loading, PageHeader, ProgressRing } from '../components/ui'
 import { todayISO } from '../constants'
@@ -38,6 +38,8 @@ export default function PlanPage({ user, onSetGoal }) {
   const [pending, setPending] = useState(new Set())
   const [actionError, setActionError] = useState('')
   const [search, setSearch] = useState('')
+  const [flash, setFlash] = useState('')
+  const flashTimer = useRef(null)
 
   // 1. Halls with menus on this date
   useEffect(() => {
@@ -91,6 +93,28 @@ export default function PlanPage({ user, onSetGoal }) {
   // item id -> food log id, so a checked dish can be un-checked
   const logByItem = useMemo(() => new Map((current?.logs || []).map((l) => [l.item_id, l.id])), [current?.logs])
 
+  // What's checked on this menu, for the sticky bar
+  const checkedTotal = useMemo(() => {
+    const servings = new Map((current?.logs || []).map((l) => [l.item_id, l.servings]))
+    let count = 0
+    let kcal = 0
+    for (const item of current?.items || []) {
+      if (!servings.has(item.id)) continue
+      count += 1
+      kcal += (item.kcal || 0) * servings.get(item.id)
+    }
+    return { count, kcal }
+  }, [current?.items, current?.logs])
+
+  // Clear the "Logged" message timer if the page closes
+  useEffect(() => () => clearTimeout(flashTimer.current), [])
+
+  const showFlash = (text) => {
+    setFlash(text)
+    clearTimeout(flashTimer.current)
+    flashTimer.current = setTimeout(() => setFlash(''), 2500)
+  }
+
   const stations = useMemo(() => {
     const q = search.trim().toLowerCase()
     const groups = new Map()
@@ -118,6 +142,7 @@ export default function PlanPage({ user, onSetGoal }) {
       // Logging changes what's left for this meal, so reload both
       const [logs, target] = await Promise.all([getFoodLogs(user.id, date), loadMealTarget(user.id, date, meal)])
       setMenu((m) => (m.key === menuKey ? { ...m, logs, target } : m))
+      showFlash(logId ? `Removed ${item.name}` : `Logged ${item.name}`)
     } catch (err) {
       setActionError(err.message)
     } finally {
@@ -206,6 +231,8 @@ export default function PlanPage({ user, onSetGoal }) {
           </div>
         </div>
       )}
+
+      <LoggedBar count={checkedTotal.count} kcal={checkedTotal.kcal} flash={flash} />
     </section>
   )
 }
@@ -318,5 +345,39 @@ function RecommendationCard({ rec }) {
       )}
       {rec.note && <p className="mt-2 text-[13px] text-white/60">{rec.note}</p>}
     </Card>
+  )
+}
+
+// Sticks just above the bottom tab bar: what's checked at this meal, plus a short "Logged" message
+function LoggedBar({ count, kcal, flash }) {
+  return (
+    <div className="pointer-events-none sticky bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-10 mt-6 space-y-2">
+      <p role="status" aria-live="polite" className="flex justify-center">
+        {flash && (
+          <span className="flex items-center gap-1.5 rounded-full bg-ink px-3.5 py-1.5 text-[13px] font-medium text-white shadow-lg">
+            <svg viewBox="0 0 24 24" className="h-4 w-4 text-good" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="m5 12 5 5 9-10" />
+            </svg>
+            <span className="max-w-[16rem] truncate">{flash}</span>
+          </span>
+        )}
+      </p>
+      {count > 0 && (
+        <a
+          href="#/progress"
+          className="pointer-events-auto flex items-center justify-between rounded-2xl bg-brand px-4 py-3 text-white shadow-[0_6px_20px_rgba(232,74,39,0.35)] transition-colors active:bg-brand-deep"
+        >
+          <span className="font-semibold">
+            {count} {count === 1 ? 'dish' : 'dishes'} · {fmt(kcal)} kcal
+          </span>
+          <span className="flex items-center gap-1 text-sm font-semibold">
+            View progress
+            <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="m9 6 6 6-6 6" />
+            </svg>
+          </span>
+        </a>
+      )}
+    </div>
   )
 }
