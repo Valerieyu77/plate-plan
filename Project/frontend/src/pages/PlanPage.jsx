@@ -289,14 +289,17 @@ function MealTargetCard({ target, meal, onSetGoal }) {
   const budget = target.meal_budget
   return (
     <Card className="flex items-center gap-5">
-      <ProgressRing value={eaten.kcal} max={budget.kcal} size={120} stroke={11} label={`${fmt(eaten.kcal)} of ${fmt(budget.kcal)} kcal eaten at ${meal}`}>
+      <ProgressRing value={eaten.kcal} max={budget.kcal} size={120} stroke={11} label={`${fmt(eaten.kcal)} of ${fmt(budget.kcal)} kcal logged for ${meal} today, at any hall`}>
         <p className="text-2xl leading-none font-bold">{fmt(left.kcal)}</p>
         <p className="mt-1 text-[11px] font-medium text-muted">kcal left</p>
       </ProgressRing>
       <div className="min-w-0 flex-1">
-        <p className="text-[13px] font-semibold text-brand">{mealLabel(meal)} budget</p>
+        <p className="text-[13px] font-semibold text-brand">
+          {mealLabel(meal)} budget: {fmt(budget.kcal)} kcal
+        </p>
+        {/* consumed_this_meal counts this meal at every hall, so say so */}
         <p className="mt-0.5 text-sm text-muted">
-          {fmt(eaten.kcal)} of {fmt(budget.kcal)} kcal eaten
+          Logged for {meal} today (any hall): <span className="font-medium text-ink">{fmt(eaten.kcal)} kcal</span>
         </p>
         <dl className="mt-3 grid grid-cols-3 gap-2 text-center">
           {[
