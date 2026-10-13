@@ -73,23 +73,9 @@ export const addWeightLog = (userId, date, weightLbs) =>
 
 export const getProgress = (userId, date) => request(`/users/${userId}/progress`, { query: { date } })
 
-// ---------- Recommendations (sample data for now) ----------
+// ---------- Recommendations ----------
 
-// GET /recommendations/meals isn't built yet (it waits on recommend() from D). Until then this
-// returns sample dishes in the same shape the endpoint will return. When the endpoint exists,
-// replace the body with:
-//   return request('/recommendations/meals', { query: { user_id: userId, hall, date, meal } })
-const SAMPLE_PICKS = [
-  { item_id: null, name: 'Herb-roasted chicken thigh', servings: 1, kcal: 340, protein_g: 34, carbs_g: 2, fat_g: 21 },
-  { item_id: null, name: 'Brown rice pilaf', servings: 1, kcal: 210, protein_g: 5, carbs_g: 42, fat_g: 3 },
-  { item_id: null, name: 'Garlic broccoli', servings: 1.5, kcal: 105, protein_g: 7.5, carbs_g: 18, fat_g: 1.5 },
-]
-
-// eslint-disable-next-line no-unused-vars
-export async function getRecommendations({ userId, hall, date, meal, target }) {
-  const total = SAMPLE_PICKS.reduce(
-    (t, i) => ({ kcal: t.kcal + i.kcal, protein_g: t.protein_g + i.protein_g, carbs_g: t.carbs_g + i.carbs_g, fat_g: t.fat_g + i.fat_g }),
-    { kcal: 0, protein_g: 0, carbs_g: 0, fat_g: 0 },
-  )
-  return { items: SAMPLE_PICKS, total, target, note: 'Sample dishes: live recommendations are not connected yet.', sample: true }
-}
+// Until D's recommend() lands, the backend returns a placeholder pick with a note saying so;
+// it switches over on its own, so nothing changes here.
+export const getRecommendations = ({ userId, hall, date, meal }) =>
+  request('/recommendations/meals', { query: { user_id: userId, hall, date, meal } })
