@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { getGoal, getUser, onWaking } from './api'
-import { ErrorNote, Loading } from './components/ui'
+import { Button, Card, Loading } from './components/ui'
 import AuthPage from './pages/AuthPage'
 import GoalPage from './pages/GoalPage'
 import PlanPage from './pages/PlanPage'
@@ -42,10 +42,9 @@ export default function App() {
 
   useEffect(() => onWaking(setWaking), [])
 
-  // Reload the signed-in user from the id saved in localStorage
-  useEffect(() => {
-    const id = getUserId()
-    if (id === null) return
+  // Reload the signed-in user from the id saved in localStorage. If the server can't be reached,
+  // keep the saved id and offer "Try again" rather than showing the sign-up page.
+  const loadUser = (id) =>
     getUser(id)
       .then((u) => {
         setUser(u)
@@ -56,7 +55,17 @@ export default function App() {
         else setRestoreError(err.message)
       })
       .finally(() => setRestoring(false))
+
+  useEffect(() => {
+    const id = getUserId()
+    if (id !== null) loadUser(id)
   }, [])
+
+  const retryRestore = () => {
+    setRestoring(true)
+    setRestoreError('')
+    loadUser(getUserId())
+  }
 
   const signedIn = async (u, { isNew }) => {
     setUserId(u.id)
@@ -73,12 +82,26 @@ export default function App() {
 
   const logOut = () => {
     clearUserId()
+    setRestoreError('')
     setUser(null)
     navigate('/')
   }
 
   let page
   if (restoring) page = <Loading />
+  else if (!user && restoreError)
+    page = (
+      <Card className="mt-6 text-center">
+        <p className="font-semibold">Couldn't load your account</p>
+        <p className="mt-1 text-sm text-muted">{restoreError}</p>
+        <Button onClick={retryRestore} className="mt-4 w-full">
+          Try again
+        </Button>
+        <button onClick={logOut} className="mt-3 text-sm font-medium text-muted hover:text-ink">
+          Use a different account
+        </button>
+      </Card>
+    )
   else if (!user || route === '/') page = <AuthPage onSignedIn={signedIn} />
   else if (route === '/goal') page = <GoalPage user={user} onContinue={() => navigate('/plan')} />
   else if (route === '/progress') page = <ProgressPage user={user} onSetGoal={() => navigate('/goal')} />
@@ -114,11 +137,6 @@ export default function App() {
       </header>
 
       <main className={`mx-auto max-w-xl px-4 pt-5 ${inApp ? 'pb-[calc(6rem+env(safe-area-inset-bottom))]' : 'pb-12'}`}>
-        {restoreError && (
-          <div className="mb-4">
-            <ErrorNote>{restoreError}</ErrorNote>
-          </div>
-        )}
         {page}
       </main>
 
