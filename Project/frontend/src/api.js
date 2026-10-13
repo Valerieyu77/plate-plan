@@ -20,21 +20,64 @@ function detailMessage(data) {
   return JSON.stringify(detail)
 }
 
+// Render's free server sleeps when idle and takes up to a minute to wake. While it wakes, requests
+// hang or fail with a network error or a 502/503/504, so we wait and retry, and tell the page (see onWaking).
+const RETRY_DELAYS_MS = [4000, 10000]
+const WAKING_STATUSES = [502, 503, 504]
+const SLOW_MS = 3000
+
+const wakingListeners = new Set()
+let wakingCount = 0
+function setWaking(delta) {
+  const wasWaking = wakingCount > 0
+  wakingCount += delta
+  if (wasWaking !== wakingCount > 0) wakingListeners.forEach((fn) => fn(wakingCount > 0))
+}
+
+// Calls fn(true) while any request is waiting for the server to wake, fn(false) when none are.
+// Returns an unsubscribe function.
+export function onWaking(fn) {
+  wakingListeners.add(fn)
+  return () => wakingListeners.delete(fn)
+}
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
 async function request(path, { method = 'GET', body, query } = {}) {
   const url = new URL(API_URL + path)
   for (const [key, value] of Object.entries(query || {})) {
     if (value !== undefined && value !== null && value !== '') url.searchParams.set(key, value)
   }
 
+  // Show the "waking up" banner if the request is slow or has to be retried
+  let waking = false
+  const markWaking = () => {
+    if (!waking) setWaking(+1)
+    waking = true
+  }
+  const slowTimer = setTimeout(markWaking, SLOW_MS)
+
   let res
   try {
-    res = await fetch(url, {
-      method,
-      headers: body ? { 'Content-Type': 'application/json' } : undefined,
-      body: body ? JSON.stringify(body) : undefined,
-    })
-  } catch {
-    throw new ApiError(0, `Can't reach the server at ${API_URL}. Is the backend running?`)
+    for (let attempt = 0; ; attempt++) {
+      try {
+        res = await fetch(url, {
+          method,
+          headers: body ? { 'Content-Type': 'application/json' } : undefined,
+          body: body ? JSON.stringify(body) : undefined,
+        })
+        if (!WAKING_STATUSES.includes(res.status) || attempt === RETRY_DELAYS_MS.length) break
+      } catch {
+        if (attempt === RETRY_DELAYS_MS.length) {
+          throw new ApiError(0, `Can't reach the server at ${API_URL}. It may still be waking up; try again in a minute.`)
+        }
+      }
+      markWaking()
+      await sleep(RETRY_DELAYS_MS[attempt])
+    }
+  } finally {
+    clearTimeout(slowTimer)
+    if (waking) setWaking(-1)
   }
 
   if (res.status === 204) return null
