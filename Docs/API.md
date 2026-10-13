@@ -79,7 +79,7 @@ Hall names come from the data, e.g. `Ikenberry Dining Center (Ike)`, `Illinois S
 `Pennsylvania Avenue Dining Hall (PAR)`, `Lincoln Avenue Dining Hall (LAR)`.
 
 ### `GET /halls?date=` ✅
-Hall names that have menu data (on `date`, if given), for the hall dropdown.
+Hall names that have menu data (on `date`, if given), for the hall dropdown. Halls that serve main meals come first (alphabetically), retail shops like 57 North last, so the first hall is a good default.
 ```json
 ["Ikenberry Dining Center (Ike)", "Illinois Street Dining Center (ISR)", "..."]
 ```

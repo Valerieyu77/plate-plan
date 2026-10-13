@@ -111,6 +111,17 @@ def test_halls_and_meals(client):
     assert client.get("/meals", params={"hall": ISR, "date": DAY, "main_only": True}).json() == ["lunch", "dinner"]
 
 
+def test_halls_with_main_meals_come_first(client):
+    from datetime import date
+
+    session = next(app.dependency_overrides[get_session]())
+    # "57 North" sorts before ISR alphabetically but only sells retail items, so it goes last
+    session.add(MenuItem(source_id="r1", date=date(2026, 10, 8), hall="57 North", meal="retail", name="Latte",
+                         kcal=190, protein_g=10, carbs_g=19, fat_g=7, allergens=["Milk"], is_recommendable=False))
+    session.commit()
+    assert client.get("/halls", params={"date": DAY}).json() == [ISR, "57 North"]
+
+
 def test_menu_items_skip_side_menus_by_default(client):
     names = {i["name"] for i in client.get("/menu-items", params={"hall": ISR, "date": DAY}).json()}
     assert names == {"Grilled Chicken", "Cheese Pizza", "Veggie Bowl", "Pasta"}
