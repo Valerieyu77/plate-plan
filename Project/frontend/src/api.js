@@ -22,7 +22,8 @@ function detailMessage(data) {
 
 // Render's free server sleeps when idle and takes up to a minute to wake. While it wakes, requests
 // hang or fail with a network error or a 502/503/504, so we wait and retry, and tell the page (see onWaking).
-const RETRY_DELAYS_MS = [4000, 10000]
+// Waits between retries: about 60 s in all, enough for a cold start
+const RETRY_DELAYS_MS = [3000, 5000, 8000, 12000, 15000, 17000]
 const WAKING_STATUSES = [502, 503, 504]
 const SLOW_MS = 3000
 
