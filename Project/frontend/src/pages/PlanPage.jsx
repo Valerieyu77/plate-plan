@@ -6,6 +6,10 @@ import { getPrefs, setPrefs } from '../session'
 
 const fmt = (n) => (n == null ? '—' : Math.round(n))
 
+// Herbs, sauces and garnishes under this many kcal are hidden until "Show all"
+const SMALL_KCAL = 20
+const isSmall = (item) => item.kcal != null && item.kcal < SMALL_KCAL
+
 // Pre-select the meal that fits the time of day, if the hall serves it
 function defaultMeal(meals) {
   const hour = new Date().getHours()
@@ -40,6 +44,7 @@ export default function PlanPage({ user, onSetGoal }) {
   const [search, setSearch] = useState('')
   const [flash, setFlash] = useState('')
   const flashTimer = useRef(null)
+  const [showSmall, setShowSmall] = useState(false)
 
   // 1. Halls with menus on this date
   useEffect(() => {
@@ -118,17 +123,22 @@ export default function PlanPage({ user, onSetGoal }) {
     flashTimer.current = setTimeout(() => setFlash(''), 2500)
   }
 
+  // Small dishes stay visible while searching, or once checked, so nothing seems to vanish
+  const q = search.trim().toLowerCase()
+  const hidingSmall = !showSmall && !q
+  const smallCount = useMemo(() => (current?.items || []).filter((i) => isSmall(i) && !logByItem.has(i.id)).length, [current?.items, logByItem])
+
   const stations = useMemo(() => {
-    const q = search.trim().toLowerCase()
     const groups = new Map()
     for (const item of current?.items || []) {
       if (q && !item.name.toLowerCase().includes(q)) continue
+      if (hidingSmall && isSmall(item) && !logByItem.has(item.id)) continue
       const station = item.station || 'Other'
       if (!groups.has(station)) groups.set(station, [])
       groups.get(station).push(item)
     }
     return [...groups.entries()]
-  }, [current?.items, search])
+  }, [current?.items, q, hidingSmall, logByItem])
 
   const pickHall = (h) => {
     setHallPick(h)
@@ -210,13 +220,23 @@ export default function PlanPage({ user, onSetGoal }) {
               </p>
             </div>
             <Input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search dishes" aria-label="Search dishes" />
+            {!q && smallCount > 0 && (
+              <div className="mt-2 flex items-center justify-between px-1 text-[13px] text-muted">
+                <span>
+                  {showSmall ? 'Showing' : 'Hiding'} {smallCount} small {smallCount === 1 ? 'item' : 'items'} under {SMALL_KCAL} kcal
+                </span>
+                <button onClick={() => setShowSmall((v) => !v)} className="font-semibold text-brand">
+                  {showSmall ? 'Hide' : 'Show all'}
+                </button>
+              </div>
+            )}
             <div className="mt-3">
               <ErrorNote>{actionError}</ErrorNote>
             </div>
             {current.items.length === 0 ? (
               <Card className="mt-3 text-sm text-muted">No dishes on this menu fit your allergies and dietary restrictions.</Card>
             ) : stations.length === 0 ? (
-              <p className="mt-3 text-sm text-muted">No dishes match "{search.trim()}".</p>
+              <p className="mt-3 text-sm text-muted">{q ? `No dishes match "${search.trim()}".` : 'Only small items on this menu. Tap "Show all" to see them.'}</p>
             ) : (
               <div className="mt-3 space-y-4">
                 {stations.map(([station, items]) => (
