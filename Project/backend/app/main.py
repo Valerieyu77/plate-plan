@@ -139,11 +139,18 @@ def read_goal(user_id: int, session: SessionDep):
 
 @app.get("/halls", response_model=list[str])
 def list_halls(session: SessionDep, date: date | None = None):
-    """Halls that have menu data (on `date`, if given), for the hall dropdown."""
-    query = select(MenuItem.hall).distinct()
+    """Halls that have menu data (on `date`, if given), for the hall dropdown.
+
+    Halls that serve main meals come first, retail shops (57 North, Caffeinator, ...) last,
+    so the first hall is a sensible default.
+    """
+    query = select(MenuItem.hall, MenuItem.is_recommendable).distinct()
     if date:
         query = query.where(MenuItem.date == date)
-    return sorted(session.exec(query).all())
+    rows = session.exec(query).all()
+    halls = {hall for hall, _ in rows}
+    with_main_meals = {hall for hall, recommendable in rows if recommendable}
+    return sorted(halls, key=lambda h: (h not in with_main_meals, h))
 
 
 @app.get("/menu-items", response_model=list[MenuItemPublic])
