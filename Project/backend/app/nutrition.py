@@ -95,6 +95,26 @@ MEAL_SLOT = {
     "light lunch": 1, "lunch": 1, "kosher lunch": 1,
     "dinner": 2, "kosher dinner": 2,
 }
+# What the user thinks of as a meal. Light lunch / kosher lunch are shown under "lunch" in the UI;
+# the data itself keeps the site's own menu names (they are never merged in the database).
+MEAL_GROUP = {
+    "breakfast": "breakfast",
+    "light lunch": "lunch", "lunch": "lunch", "kosher lunch": "lunch",
+    "dinner": "dinner", "kosher dinner": "dinner",
+}
+GROUP_ORDER = ["breakfast", "lunch", "dinner"]
+# Order of the site's menu names within a day, earliest first
+MEAL_ORDER = ["breakfast", "light lunch", "lunch", "kosher lunch", "dinner", "kosher dinner"]
+
+
+def meals_in_group(name: str) -> list[str]:
+    """'lunch' -> ['light lunch', 'lunch', 'kosher lunch']; a raw name like 'light lunch' -> itself."""
+    key = name.strip().lower()
+    if key in GROUP_ORDER:
+        return [m for m in MEAL_ORDER if MEAL_GROUP[m] == key]
+    return [key]
+
+
 # Share of the day's food for each slot, when all three are still ahead
 SLOT_WEIGHT = {0: 0.25, 1: 0.35, 2: 0.40}
 
@@ -124,22 +144,21 @@ def item_nutrients(item, servings: float) -> dict:
 
 def _fit_macros_to_calories(target: dict) -> dict:
     """
-    Scale protein/carbs/fat down when together they would need more calories than are left
-    (e.g. 235 kcal left but 120 g protein + 142 g carbs + 41 g fat is impossible to eat).
-    Keeps their proportions, so the three macros always add up to at most the calorie target.
+    Make protein/carbs/fat fit inside the calories left (e.g. 235 kcal left but 120 g protein +
+    142 g carbs + 41 g fat would need about 1400 kcal). Protein is kept first because it is the
+    macro people are trying to hit; carbs and fat are scaled down, keeping their ratio, to fill
+    the calories that remain. So the three macros never need more calories than the target.
     """
-    if target["kcal"] <= 0:
+    kcal = target["kcal"]
+    if kcal <= 0:
         return {k: 0.0 for k in NUTRIENTS}
-    implied = 4 * target["protein_g"] + 4 * target["carbs_g"] + 9 * target["fat_g"]
-    if implied <= target["kcal"]:
+    protein, carbs, fat = target["protein_g"], target["carbs_g"], target["fat_g"]
+    if 4 * protein + 4 * carbs + 9 * fat <= kcal:
         return dict(target)
-    factor = target["kcal"] / implied
-    return {
-        "kcal": target["kcal"],
-        "protein_g": target["protein_g"] * factor,
-        "carbs_g": target["carbs_g"] * factor,
-        "fat_g": target["fat_g"] * factor,
-    }
+    if 4 * protein >= kcal:  # not even the protein fits: use all calories for protein
+        return {"kcal": kcal, "protein_g": kcal / 4, "carbs_g": 0.0, "fat_g": 0.0}
+    factor = (kcal - 4 * protein) / (4 * carbs + 9 * fat)
+    return {"kcal": kcal, "protein_g": protein, "carbs_g": carbs * factor, "fat_g": fat * factor}
 
 
 def meal_target(daily: dict, consumed_by_meal: dict[str, dict], meal: str) -> dict:

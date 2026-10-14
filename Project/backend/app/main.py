@@ -1,3 +1,5 @@
+import inspect
+import logging
 from contextlib import asynccontextmanager
 from datetime import date
 from typing import Annotated
@@ -14,8 +16,11 @@ from .models import (
 from .dietary import allowed_for_user
 from .recommend import recommend
 from .nutrition import (
-    add_nutrients, daily_targets, day_progress, goal_to_targets, item_nutrients, meal_target, zero_nutrients,
+    GROUP_ORDER, MEAL_GROUP, MEAL_ORDER, NUTRIENTS, add_nutrients, daily_targets, day_progress, goal_to_targets,
+    item_nutrients, meal_target, meals_in_group, zero_nutrients,
 )
+
+log = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -59,10 +64,6 @@ def read_user(user_id: int, session: SessionDep):
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     return user
-
-
-# Main meals in the order they happen during the day; anything else (salad bar, cereal, ...) sorts after
-MEAL_ORDER = ["breakfast", "light lunch", "lunch", "kosher lunch", "dinner", "kosher dinner"]
 
 
 @app.get("/meals", response_model=list[str])
@@ -138,8 +139,11 @@ def read_goal(user_id: int, session: SessionDep):
 # ---------- Menus ----------
 
 @app.get("/halls", response_model=list[str])
-def list_halls(session: SessionDep, date: date | None = None):
+def list_halls(session: SessionDep, date: date | None = None, meal: str | None = None):
     """Halls that have menu data (on `date`, if given), for the hall dropdown.
+
+    With `meal` ("breakfast", "lunch" or "dinner"), only halls that serve that meal on that date.
+    "lunch" also counts "light lunch" and "kosher lunch"; a raw name like "light lunch" matches only itself.
 
     Order: the big dining centers (Ike, ISR, LAR, PAR), then other halls with main meals
     (Everybody Eats, Kosher Kitchen), then retail shops (57 North, Caffeinator, ...), so the
@@ -148,15 +152,37 @@ def list_halls(session: SessionDep, date: date | None = None):
     query = select(MenuItem.hall, MenuItem.is_recommendable).distinct()
     if date:
         query = query.where(MenuItem.date == date)
+    if meal:
+        query = query.where(MenuItem.meal.in_(meals_in_group(meal)), MenuItem.is_recommendable)
     rows = session.exec(query).all()
     halls = {hall for hall, _ in rows}
     with_main_meals = {hall for hall, recommendable in rows if recommendable}
+
     def rank(hall):
         if hall not in with_main_meals:
             return 2
         return 0 if "Dining" in hall else 1
 
     return sorted(halls, key=lambda h: (rank(h), h))
+
+
+@app.get("/meal-options")
+def meal_options(hall: str, date: date, session: SessionDep):
+    """
+    The meals a hall serves on a date, grouped the way people think of them, for the meal picker:
+    {"breakfast": ["breakfast"], "lunch": ["light lunch", "lunch"], "dinner": ["dinner"]}.
+    A group is left out if the hall doesn't serve it; a group with more than one entry means the
+    user should be asked which one (e.g. "light lunch" or "lunch"). Side menus are not included.
+    """
+    names = session.exec(
+        select(MenuItem.meal).where(MenuItem.hall == hall, MenuItem.date == date, MenuItem.is_recommendable).distinct()
+    ).all()
+    options: dict[str, list[str]] = {}
+    for group in GROUP_ORDER:
+        in_group = sorted((m for m in names if MEAL_GROUP.get(m) == group), key=MEAL_ORDER.index)
+        if in_group:
+            options[group] = in_group
+    return options
 
 
 @app.get("/menu-items", response_model=list[MenuItemPublic])
@@ -278,29 +304,59 @@ def read_progress(user_id: int, date: date, session: SessionDep):
 
 # ---------- Recommendations ----------
 
-def _placeholder_recommendation(target: dict, items: list[MenuItem]) -> dict:
-    """Stand-in until D's recommend() is written: one serving of each dish in menu order until the
-    calories reach the target (at most 3 dishes). Same response shape as recommend()."""
+def _placeholder_recommendation(target: dict, items: list[MenuItem], note: str = "Placeholder: not optimised yet.") -> dict:
+    """Stand-in used when recommend() is missing or fails: one serving of each real dish (skipping
+    herbs and sauces under 40 kcal) in menu order until the calories reach the target, at most 3 dishes.
+    Same response shape as recommend()."""
     lines, total = [], zero_nutrients()
-    for item in items[:3]:
+    for item in [i for i in items if i.kcal >= 40][:3]:
         if total["kcal"] >= target["kcal"]:
             break
         nutrients = item_nutrients(item, 1)
         lines.append({"item_id": item.id, "name": item.name, "servings": 1, **nutrients})
         total = add_nutrients(total, nutrients)
     return {"items": lines, "total": total, "target": target,
-            "note": "Placeholder: not optimised yet." if lines else "No dishes on this menu fit your restrictions."}
+            "note": note if lines else "No dishes on this menu fit your restrictions."}
+
+
+def _is_valid_recommendation(result) -> bool:
+    """Guard against a broken recommend(): the shape the frontend relies on must be there."""
+    try:
+        if not isinstance(result, dict) or not isinstance(result["items"], list):
+            return False
+        for block in (result["total"], result["target"]):
+            if not all(isinstance(block[k], (int, float)) for k in NUTRIENTS):
+                return False
+        for line in result["items"]:
+            if not all(k in line for k in ("item_id", "name", "servings", *NUTRIENTS)):
+                return False
+            if not isinstance(line["servings"], (int, float)) or line["servings"] <= 0:
+                return False
+        return "note" in result
+    except (KeyError, TypeError):
+        return False
 
 
 @app.get("/recommendations/meals")
-def recommend_meal(user_id: int, hall: str, date: date, meal: str, session: SessionDep):
+def recommend_meal(user_id: int, hall: str, date: date, meal: str, session: SessionDep, seed: int | None = None):
     """
     Recommended dishes for one meal: aims at the meal's target from GET /users/{id}/meal-target,
     choosing among the dishes from GET /menu-items?user_id= (allergies and restrictions applied).
+    A different `seed` gives a different, similarly good option ("show me another"); without one the
+    answer is always the same. If recommend() is missing, errors, or returns something malformed, a
+    simple placeholder in the same shape is returned instead, so the page never breaks.
     """
     target = read_meal_target(user_id, date, meal, session)["target"]
     items = list_menu_items(hall, date, session, meal=meal, user_id=user_id)
+    kwargs = {"seed": seed} if seed is not None and "seed" in inspect.signature(recommend).parameters else {}
     try:
-        return recommend(target, [item.model_dump() for item in items])
+        result = recommend(target, [item.model_dump() for item in items], **kwargs)
     except NotImplementedError:
         return _placeholder_recommendation(target, items)
+    except Exception:
+        log.exception("recommend() failed")
+        return _placeholder_recommendation(target, items, "Recommendation engine unavailable; showing a simple placeholder.")
+    if not _is_valid_recommendation(result):
+        log.error("recommend() returned a malformed result: %r", result)
+        return _placeholder_recommendation(target, items, "Recommendation engine unavailable; showing a simple placeholder.")
+    return result

@@ -79,13 +79,13 @@ The full specification, with request and response examples for every endpoint, i
 |---|---|---|
 | `POST /users`, `GET /users/{id}` | Sign up and read a profile | Done |
 | `PUT /users/{id}/goal`, `GET /users/{id}/goal` | Pick lose / maintain / gain, get daily targets | Done |
-| `GET /halls`, `GET /meals` | Halls with data, and the meals a hall serves on a date | Done |
+| `GET /halls`, `GET /meal-options`, `GET /meals` | Halls (optionally only those serving a meal), the meals a hall serves grouped as breakfast / lunch / dinner, and the raw meal names | Done |
 | `GET /menu-items` | Dishes on a menu, filtered for a user's allergies and diet | Done |
 | `GET /users/{id}/meal-target` | What is left to eat at this meal (adjusted for what was already logged) | Done |
 | `POST/GET/DELETE /users/{id}/food-logs` | Log, list and un-check eaten dishes | Done |
 | `POST/GET /users/{id}/weight-logs` | Log and list weigh-ins | Done |
 | `GET /users/{id}/progress` | Target vs actual for a day, plus weight history | Done |
-| `GET /recommendations/meals` | Recommended dishes for a meal | Not started |
+| `GET /recommendations/meals` | Recommended dishes for a meal (never breaks: falls back to a placeholder) | Done |
 
 ## Menu data
 
@@ -103,7 +103,7 @@ python -m scraper.menu_scraper --days 3 --halls 1 11 --dry-run --json out.json  
 - A weekly GitHub Actions job is set up in `.github/workflows/scrape-menus.yml`, but GitHub currently refuses to start workflows for this organization (a billing / spending-limit message), so for now the scraper is run by hand about once a week.
 
 Things worth knowing about the data:
-- `meal` is the site's own menu name, lowercase: `breakfast`, `lunch`, `light lunch`, `dinner`, and also `salad bar`, `beverages`, and so on. Not every hall serves every meal (Ike has a light lunch, LAR has no breakfast), so list a hall's meals with `GET /meals` instead of hardcoding them.
+- `meal` is the site's own menu name, lowercase: `breakfast`, `lunch`, `light lunch`, `dinner`, and also `salad bar`, `beverages`, and so on. Not every hall serves every meal (Ike has a light lunch, LAR has no breakfast), so list a hall's meals with `GET /meal-options` instead of hardcoding them.
 - `is_recommendable` is true only for main meals. Side menus are stored but marked false.
 - `allergens` holds the site's tags. Which ones count as real allergens (Milk, Peanuts, ...) and which are just labels (Kosher, Halal, Pork, ...) is defined in `app/dietary.py`.
 - Dishes missing calories or any macro are skipped. Values the site marks "NA" are stored as empty, not zero.

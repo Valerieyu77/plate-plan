@@ -22,7 +22,7 @@ Status: ✅ built and merged, 🟡 build with mock data first, ⬜ not started.
 |---|---|
 | Sign up with body info | `POST /users` ✅ |
 | Set a goal, get daily targets | `PUT /users/{id}/goal` ✅ |
-| Choose hall + date, see which meals exist | `GET /halls` ✅, `GET /meals` ✅ |
+| Pick a meal first, then a hall that serves it | `GET /halls?meal=` ✅, `GET /meal-options` ✅ |
 | See this meal's target and the dishes the user can eat | `GET /users/{id}/meal-target` ✅, `GET /menu-items?user_id=` ✅ |
 | Get recommended dishes for that meal | `GET /recommendations/meals` 🟡 (D) |
 | Check off / un-check what was eaten | `POST` ✅ and `DELETE /users/{id}/food-logs` ✅ |
@@ -78,8 +78,15 @@ Meals a hall serves on a date, for the dropdown. Returns a list of strings in ti
 Hall names come from the data, e.g. `Ikenberry Dining Center (Ike)`, `Illinois Street Dining Center (ISR)`,
 `Pennsylvania Avenue Dining Hall (PAR)`, `Lincoln Avenue Dining Hall (LAR)`.
 
-### `GET /halls?date=` ✅
-Hall names that have menu data (on `date`, if given), for the hall dropdown. Order: the big dining centers (Ike, ISR, LAR, PAR), then other halls with main meals (Everybody Eats, Kosher Kitchen), then retail shops like 57 North; alphabetical within each group, so the first hall (Ike) is a good default.
+### `GET /meal-options?hall=&date=` ✅
+The meals a hall serves on a date, grouped the way people think of them, for the meal picker. Side menus are left out.
+```json
+{ "breakfast": ["breakfast"], "lunch": ["light lunch", "lunch"], "dinner": ["dinner"] }
+```
+A group is left out when the hall doesn't serve it (LAR has no `breakfast`). **If a group has more than one entry** (Ike's `lunch` has `light lunch` and `lunch`), ask the user which one; otherwise go straight to the menu. The data is never merged: send the chosen raw name (e.g. `light lunch`) as `meal` to the other endpoints.
+
+### `GET /halls?date=&meal=` ✅
+Hall names that have menu data (on `date`, if given), for the hall dropdown. With `meal` (`breakfast`, `lunch` or `dinner`), only halls that serve that meal that day (`lunch` includes light lunch and kosher lunch; a raw name like `light lunch` matches only itself), so the meal can be picked first. Order: the big dining centers (Ike, ISR, LAR, PAR), then other halls with main meals (Everybody Eats, Kosher Kitchen), then retail shops like 57 North; alphabetical within each group, so the first hall (Ike) is a good default.
 ```json
 ["Ikenberry Dining Center (Ike)", "Illinois Street Dining Center (ISR)", "..."]
 ```
@@ -96,7 +103,7 @@ The dishes on a menu. With `user_id`, dishes that break that user's allergies or
 Nutrients are per ONE serving.
 
 ### `GET /users/{id}/meal-target?date=&meal=` ✅
-What is left to eat at this meal. What was logged at other meals is subtracted from the day's target; the rest is shared between this meal and every part of the day with nothing logged yet (a meal that wasn't logged counts as still to come, so dinner with nothing logged is about 40% of the day, not all of it); then what is already logged at this meal is subtracted. The macros are scaled down if they would need more calories than are left. This is the target the recommendation step is asked to hit.
+What is left to eat at this meal. What was logged at other meals is subtracted from the day's target; the rest is shared between this meal and every part of the day with nothing logged yet (a meal that wasn't logged counts as still to come, so dinner with nothing logged is about 40% of the day, not all of it); then what is already logged at this meal is subtracted. If protein, carbs and fat together would need more calories than are left, protein is kept and carbs and fat are scaled down to fit (so you never see e.g. 235 kcal with 120 g protein). This is the target the recommendation step is asked to hit.
 ```json
 {
   "date": "2026-10-08", "meal": "dinner",
@@ -110,8 +117,8 @@ What is left to eat at this meal. What was logged at other meals is subtracted f
 `404` if the user has no goal yet; `422` if `meal` is not breakfast, lunch, light lunch, dinner, kosher lunch or kosher dinner.
 Meal weights: breakfast 0.25, lunch / light lunch 0.35, dinner 0.40 (renormalised over this meal and the meals with nothing logged yet).
 
-### `GET /recommendations/meals?user_id=&hall=&date=&meal=` 🟡 (B + D compute, C exposes)
-Recommended dishes for one meal. Returns hard-coded mock data at first.
+### `GET /recommendations/meals?user_id=&hall=&date=&meal=&seed=` ✅ (D's `recommend()` in `app/recommend.py`)
+Recommended dishes for one meal. Without `seed` the answer is always the same; a different `seed` (any integer) gives a different, similarly good option, for a "show me another" button. If `recommend()` is missing, errors, or returns something malformed, a simple placeholder in the same shape is returned (with an explanatory `note`), so the page never breaks.
 ```json
 {
   "items": [
