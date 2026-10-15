@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { addFoodLog, deleteFoodLog, getFoodLogs, getHalls, getMealOptions, getMealTarget, getMenuItems, getRecommendations } from '../api'
+import HallPicks from '../components/HallPicks'
 import { Button, Card, ChipScroller, DateChip, ErrorNote, Input, Label, Loading, PageHeader, ProgressRing } from '../components/ui'
 import { ALLERGIES, MEAL_GROUPS, MEAL_SHARE, todayISO } from '../constants'
 import { getPrefs, setPrefs } from '../session'
@@ -284,6 +285,12 @@ export default function PlanPage({ user, onSetGoal }) {
           </div>
         )}
       </div>
+
+      {hall && (
+        <div className="mt-5">
+          <HallPicks userId={user.id} date={date} group={groupPick} hall={hall} onPickHall={pickHall} version={current?.target?.consumed_this_meal?.kcal ?? 0} />
+        </div>
+      )}
 
       <div className="mt-6">
         {menuKey && !current && <Loading>Loading the menu…</Loading>}

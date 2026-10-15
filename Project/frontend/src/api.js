@@ -105,6 +105,9 @@ export const getMeals = (hall, date) => request('/meals', { query: { hall, date,
 export const getMenuItems = ({ hall, date, meal, userId }) =>
   request('/menu-items', { query: { hall, date, meal, user_id: userId } })
 
+// Which hall suits the next meal best: a match score and a high-protein plate for every hall that serves it
+export const getHallPicks = (userId, date, meal) => request(`/users/${userId}/hall-picks`, { query: { date, meal } })
+
 export const getMealTarget = (userId, date, meal) => request(`/users/${userId}/meal-target`, { query: { date, meal } })
 
 // ---------- Logs and progress ----------
