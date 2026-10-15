@@ -435,3 +435,21 @@ def test_hall_picks_follow_what_was_already_logged(client):
     client.post(f"/users/{uid}/food-logs", json={"item_id": item, "servings": 1})
     after = client.get(f"/users/{uid}/hall-picks", params={"date": DAY, "meal": "lunch"}).json()["target"]["kcal"]
     assert after < before
+
+
+def test_best_protein_never_names_a_hall_without_a_high_protein_plate(client, monkeypatch):
+    import app.main as main
+    real = main.recommend
+
+    def no_protein_plate(target, items, **kwargs):
+        # the high-protein request has a 40%-protein split; make it come back empty for every hall
+        if target["protein_g"] * 4 >= 0.39 * target["kcal"]:
+            return {"items": [], "total": {"kcal": 0, "protein_g": 0, "carbs_g": 0, "fat_g": 0}, "target": target, "note": "none"}
+        return real(target, items, **kwargs)
+
+    monkeypatch.setattr(main, "recommend", no_protein_plate)
+    uid = make_user(client)
+    client.put(f"/users/{uid}/goal", json={"goal_type": "maintain"})
+    r = client.get(f"/users/{uid}/hall-picks", params={"date": DAY, "meal": "lunch"}).json()
+    assert r["halls"] and r["best_match"]  # the hall comparison still works
+    assert r["best_protein"] is None

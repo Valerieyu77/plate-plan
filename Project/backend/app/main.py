@@ -412,7 +412,8 @@ def hall_picks(user_id: int, date: date, meal: str, session: SessionDep):
             },
         })
     results.sort(key=lambda r: (-r["match"], r["hall"]))
-    best_protein = max(results, key=lambda r: r["high_protein"]["total"]["protein_g"], default=None)
+    # Only a hall that really has a high-protein plate can be named: never an empty one
+    best_protein = max((r for r in results if r["high_protein"]["items"]), key=lambda r: r["high_protein"]["total"]["protein_g"], default=None)
     return {
         "date": date, "meal": group, "target": target, "halls": results,
         "best_match": results[0]["hall"] if results else None,
