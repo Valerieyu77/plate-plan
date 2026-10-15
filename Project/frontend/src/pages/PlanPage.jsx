@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { addFoodLog, deleteFoodLog, getFoodLogs, getHalls, getMealTarget, getMeals, getMenuItems, getRecommendations } from '../api'
+import { addFoodLog, deleteFoodLog, getFoodLogs, getHalls, getMealOptions, getMealTarget, getMenuItems, getRecommendations } from '../api'
 import { Button, Card, ChipScroller, DateChip, ErrorNote, Input, Label, Loading, PageHeader, ProgressRing } from '../components/ui'
-import { todayISO } from '../constants'
+import { ALLERGIES, MEAL_GROUPS, MEAL_SHARE, todayISO } from '../constants'
 import { getPrefs, setPrefs } from '../session'
 
 const fmt = (n) => (n == null ? '—' : Math.round(n))
+
+// "1.5 × 1/2 Cup", or "2 servings" when the dish has no serving description
+const amountOf = (line) => (line.serving_unit ? `${line.servings} × ${line.serving_unit}` : `${line.servings} ${line.servings === 1 ? 'serving' : 'servings'}`)
 
 // Herbs, sauces and garnishes under this many kcal are hidden until "Show all"
 const SMALL_KCAL = 20
@@ -14,12 +17,22 @@ const isSmall = (item) => item.kcal != null && item.kcal < SMALL_KCAL
 const SERVING_STEP = 0.5
 const MAX_SERVINGS = 5
 
-// Pre-select the meal that fits the time of day, if the hall serves it
-function defaultMeal(meals) {
+// The meal that fits the time of day: breakfast, lunch or dinner
+function defaultGroup() {
   const hour = new Date().getHours()
-  const wanted = hour < 10 ? ['breakfast'] : hour < 15 ? ['lunch', 'light lunch'] : ['dinner']
-  return meals.find((m) => wanted.includes(m)) || meals[0] || null
+  return hour < 10 ? 'breakfast' : hour < 15 ? 'lunch' : 'dinner'
 }
+
+// A group can have more than one menu (lunch: "light lunch" and "lunch"). Start on the plain one.
+const defaultOption = (options) => options.find((o) => o === 'lunch') || options[0] || null
+
+// Dish groups, in the order people eat them; anything else follows alphabetically
+const CATEGORY_ORDER = ['Entrees', 'Proteins', 'Starches', 'Vegetables', 'Soups', 'Salads & Salad Bar', 'Appetizers & Sides', 'Breads', 'Cheeses', 'Fruits', 'Desserts']
+const categoryRank = (c) => (CATEGORY_ORDER.includes(c) ? CATEGORY_ORDER.indexOf(c) : CATEGORY_ORDER.length)
+
+// The allergens a dish carries, leaving out the labels the dining site mixes in (Kosher, Halal, Local...)
+const ALLERGEN_SET = new Set(ALLERGIES.map((a) => a.toLowerCase()))
+const allergensOf = (item) => (item.allergens || []).filter((a) => ALLERGEN_SET.has(a.toLowerCase()))
 
 // "Ikenberry Dining Center (Ike)" -> "Ike" for the compact buttons; the full name is still what we send
 const shortHall = (hall) => hall.match(/\(([^)]+)\)\s*$/)?.[1] || hall
@@ -38,10 +51,11 @@ async function loadMealTarget(userId, date, meal) {
 
 export default function PlanPage({ user, onSetGoal }) {
   const [date, setDate] = useState(todayISO())
+  const [groupPick, setGroupPick] = useState(defaultGroup)
   const [hallPick, setHallPick] = useState(() => getPrefs(user.id).hall || null)
-  const [mealPick, setMealPick] = useState(null)
+  const [optionPick, setOptionPick] = useState(null)
   const [halls, setHalls] = useState({ key: null })
-  const [meals, setMeals] = useState({ key: null })
+  const [options, setOptions] = useState({ key: null })
   const [menu, setMenu] = useState({ key: null })
   const [pending, setPending] = useState(new Set())
   const [actionError, setActionError] = useState('')
@@ -49,40 +63,45 @@ export default function PlanPage({ user, onSetGoal }) {
   const [flash, setFlash] = useState('')
   const flashTimer = useRef(null)
   const [showSmall, setShowSmall] = useState(false)
+  const [recBusy, setRecBusy] = useState(false)
+  const [trayBusy, setTrayBusy] = useState(false)
+  const shownIds = useRef([]) // dishes in the trays already shown for this menu, so "another" is different
 
-  // 1. Halls with menus on this date
+  // 1. Halls that serve this meal on this date (shops that sell no main meals are not listed)
+  const hallsKey = `${date}|${groupPick}`
   useEffect(() => {
     let ignore = false
-    getHalls(date)
-      .then((list) => !ignore && setHalls({ key: date, list }))
-      .catch((error) => !ignore && setHalls({ key: date, list: [], error }))
+    getHalls(date, groupPick)
+      .then((list) => !ignore && setHalls({ key: hallsKey, list }))
+      .catch((error) => !ignore && setHalls({ key: hallsKey, list: [], error }))
     return () => {
       ignore = true
     }
-  }, [date])
-  const hallList = halls.key === date ? halls.list : null
+  }, [hallsKey, date, groupPick])
+  const hallList = halls.key === hallsKey ? halls.list : null
   const hall = hallList ? (hallList.includes(hallPick) ? hallPick : hallList[0] || null) : null
 
-  // 2. Meals that hall serves on this date
-  const mealsKey = hall ? `${hall}|${date}` : null
+  // 2. Which menus that hall has for this meal. More than one (light lunch / lunch) means ask.
+  const optionsKey = hall ? `${hall}|${date}` : null
   useEffect(() => {
-    if (!mealsKey) return
+    if (!optionsKey) return
     let ignore = false
-    getMeals(hall, date)
-      .then((list) => !ignore && setMeals({ key: mealsKey, list }))
-      .catch((error) => !ignore && setMeals({ key: mealsKey, list: [], error }))
+    getMealOptions(hall, date)
+      .then((byGroup) => !ignore && setOptions({ key: optionsKey, byGroup }))
+      .catch((error) => !ignore && setOptions({ key: optionsKey, byGroup: {}, error }))
     return () => {
       ignore = true
     }
-  }, [mealsKey, hall, date])
-  const mealList = mealsKey && meals.key === mealsKey ? meals.list : null
-  const meal = mealList ? (mealList.includes(mealPick) ? mealPick : defaultMeal(mealList)) : null
+  }, [optionsKey, hall, date])
+  const optionList = optionsKey && options.key === optionsKey ? options.byGroup[groupPick] || [] : null
+  const meal = optionList ? (optionList.includes(optionPick) ? optionPick : defaultOption(optionList)) : null
 
   // 3. This meal's target, the dishes the user can eat, today's logs, and the recommendation
   const menuKey = meal ? `${hall}|${date}|${meal}` : null
   useEffect(() => {
     if (!menuKey) return
     let ignore = false
+    shownIds.current = []
     Promise.all([
       getMenuItems({ hall, date, meal, userId: user.id }),
       loadMealTarget(user.id, date, meal),
@@ -132,16 +151,16 @@ export default function PlanPage({ user, onSetGoal }) {
   const hidingSmall = !showSmall && !q
   const smallCount = useMemo(() => (current?.items || []).filter((i) => isSmall(i) && !logByItem.has(i.id)).length, [current?.items, logByItem])
 
-  const stations = useMemo(() => {
+  const categories = useMemo(() => {
     const groups = new Map()
     for (const item of current?.items || []) {
       if (q && !item.name.toLowerCase().includes(q)) continue
       if (hidingSmall && isSmall(item) && !logByItem.has(item.id)) continue
-      const station = item.station || 'Other'
-      if (!groups.has(station)) groups.set(station, [])
-      groups.get(station).push(item)
+      const category = item.category || 'Other'
+      if (!groups.has(category)) groups.set(category, [])
+      groups.get(category).push(item)
     }
-    return [...groups.entries()]
+    return [...groups.entries()].sort(([a], [b]) => categoryRank(a) - categoryRank(b) || a.localeCompare(b))
   }, [current?.items, q, hidingSmall, logByItem])
 
   const pickHall = (h) => {
@@ -175,11 +194,61 @@ export default function PlanPage({ user, onSetGoal }) {
     }
   }
 
+  const reloadAfterLogging = async () => {
+    const [logs, target] = await Promise.all([getFoodLogs(user.id, date), loadMealTarget(user.id, date, meal)])
+    setMenu((m) => (m.key === menuKey ? { ...m, logs, target } : m))
+  }
+
+  // Log every dish of the recommended tray with its servings (replacing a dish that is already logged)
+  const logTray = async () => {
+    const lines = current?.rec?.items || []
+    setActionError('')
+    setTrayBusy(true)
+    try {
+      try {
+        for (const line of lines) {
+          const existing = logByItem.get(line.item_id)
+          if (existing) await deleteFoodLog(user.id, existing.id)
+          await addFoodLog(user.id, line.item_id, line.servings)
+        }
+      } finally {
+        await reloadAfterLogging()
+      }
+      showFlash(`Logged ${lines.length} ${lines.length === 1 ? 'dish' : 'dishes'}`)
+    } catch (err) {
+      setActionError(err.message)
+    } finally {
+      setTrayBusy(false)
+    }
+  }
+
+  // Ask for a different, similarly good tray: steer away from every dish already shown for this menu
+  const anotherTray = async () => {
+    shownIds.current = [...new Set([...shownIds.current, ...(current?.rec?.items || []).map((l) => l.item_id)])]
+    setActionError('')
+    setRecBusy(true)
+    try {
+      const rec = await getRecommendations({ userId: user.id, hall, date, meal, avoid: shownIds.current })
+      setMenu((m) => (m.key === menuKey ? { ...m, rec } : m))
+    } catch (err) {
+      setActionError(err.message)
+    } finally {
+      setRecBusy(false)
+    }
+  }
+
+  const trayLogged = (current?.rec?.items || []).length > 0 && current.rec.items.every((l) => logByItem.get(l.item_id)?.servings === l.servings)
+
   return (
     <section>
       <PageHeader title="Plan a meal" sub="Dishes that clash with your allergies or diet are hidden." action={<DateChip value={date} onChange={setDate} />} />
 
       <div className="space-y-4">
+        <div>
+          <Label className="mb-2">Meal</Label>
+          <ChipScroller label="Meal" options={MEAL_GROUPS} value={groupPick} onChange={setGroupPick} getLabel={mealLabel} />
+        </div>
+
         <div>
           <Label className="mb-2">Dining hall</Label>
           {halls.error ? (
@@ -187,7 +256,9 @@ export default function PlanPage({ user, onSetGoal }) {
           ) : !hallList ? (
             <Loading />
           ) : hallList.length === 0 ? (
-            <Card className="text-sm text-muted">No menus have been loaded for this date yet. Try another day.</Card>
+            <Card className="text-sm text-muted">
+              No dining hall has {groupPick} on this date. Menus are published about two weeks ahead, so try another day or meal.
+            </Card>
           ) : (
             <ChipScroller label="Dining hall" options={hallList} value={hall} onChange={pickHall} getLabel={shortHall} />
           )}
@@ -196,15 +267,19 @@ export default function PlanPage({ user, onSetGoal }) {
 
         {hall && (
           <div>
-            <Label className="mb-2">Meal</Label>
-            {meals.error && meals.key === mealsKey ? (
-              <ErrorNote>{meals.error.message}</ErrorNote>
-            ) : !mealList ? (
+            {options.error && options.key === optionsKey ? (
+              <ErrorNote>{options.error.message}</ErrorNote>
+            ) : !optionList ? (
               <Loading />
-            ) : mealList.length === 0 ? (
-              <Card className="text-sm text-muted">This hall has no main meals on this date.</Card>
+            ) : optionList.length === 0 ? (
+              <Card className="text-sm text-muted">This hall doesn't serve {groupPick} on this date.</Card>
             ) : (
-              <ChipScroller label="Meal" options={mealList} value={meal} onChange={setMealPick} getLabel={mealLabel} />
+              optionList.length > 1 && (
+                <>
+                  <Label className="mb-2">Which {groupPick}?</Label>
+                  <ChipScroller label={`Which ${groupPick}`} options={optionList} value={meal} onChange={setOptionPick} getLabel={mealLabel} />
+                </>
+              )
             )}
           </div>
         )}
@@ -217,8 +292,10 @@ export default function PlanPage({ user, onSetGoal }) {
 
       {current && !current.error && (
         <div className="space-y-4">
-          <MealTargetCard target={current.target} meal={meal} onSetGoal={onSetGoal} />
-          {current.rec && <RecommendationCard rec={current.rec} />}
+          <MealTargetCard target={current.target} meal={meal} group={groupPick} onSetGoal={onSetGoal} />
+          {current.rec && (
+            <RecommendationCard rec={current.rec} logged={trayLogged} logBusy={trayBusy} anotherBusy={recBusy} onLog={logTray} onAnother={anotherTray} />
+          )}
 
           <div className="pt-2">
             <div className="mb-3 flex items-baseline justify-between">
@@ -243,13 +320,13 @@ export default function PlanPage({ user, onSetGoal }) {
             </div>
             {current.items.length === 0 ? (
               <Card className="mt-3 text-sm text-muted">No dishes on this menu fit your allergies and dietary restrictions.</Card>
-            ) : stations.length === 0 ? (
+            ) : categories.length === 0 ? (
               <p className="mt-3 text-sm text-muted">{q ? `No dishes match "${search.trim()}".` : 'Only small items on this menu. Tap "Show all" to see them.'}</p>
             ) : (
               <div className="mt-3 space-y-4">
-                {stations.map(([station, items]) => (
-                  <div key={station}>
-                    <Label className="mb-1.5 px-1">{station}</Label>
+                {categories.map(([category, items]) => (
+                  <div key={category}>
+                    <Label className="mb-1.5 px-1">{category}</Label>
                     <ul className="divide-y divide-line overflow-hidden rounded-2xl bg-surface shadow-[0_1px_3px_rgba(19,41,75,0.06)]">
                       {items.map((item) => (
                         <DishRow
@@ -291,6 +368,7 @@ function DishRow({ item, servings, busy, onServings }) {
             <span className="font-medium text-ink">{fmt(item.kcal)} kcal</span> · {fmt(item.protein_g)}P {fmt(item.carbs_g)}C {fmt(item.fat_g)}F
             {serving && ` · ${serving}`}
           </p>
+          {allergensOf(item).length > 0 && <p className="mt-0.5 text-[12px] text-muted">Contains {allergensOf(item).join(', ')}</p>}
         </div>
         <input type="checkbox" checked={checked} disabled={busy} onChange={() => onServings(checked ? 0 : 1)} aria-label={`Ate ${item.name}`} className="peer sr-only" />
         {!checked && (
@@ -335,7 +413,7 @@ function ServingStepper({ name, servings, busy, onChange }) {
   )
 }
 
-function MealTargetCard({ target, meal, onSetGoal }) {
+function MealTargetCard({ target, meal, group, onSetGoal }) {
   if (target.missingGoal) {
     return (
       <Card>
@@ -360,7 +438,10 @@ function MealTargetCard({ target, meal, onSetGoal }) {
           {mealLabel(meal)} budget: {fmt(budget.kcal)} kcal
         </p>
         {/* consumed_this_meal counts this meal at every hall, so say so */}
-        <p className="mt-0.5 text-sm text-muted">
+        <p className="mt-0.5 text-[13px] text-muted">
+          {mealLabel(group)} is about {MEAL_SHARE[group]}% of your day; it shifts with what you have already logged.
+        </p>
+        <p className="mt-1 text-sm text-muted">
           Logged for {meal} today (any hall): <span className="font-medium text-ink">{fmt(eaten.kcal)} kcal</span>
         </p>
         <dl className="mt-3 grid grid-cols-3 gap-2 text-center">
@@ -380,36 +461,44 @@ function MealTargetCard({ target, meal, onSetGoal }) {
   )
 }
 
-function RecommendationCard({ rec }) {
+function RecommendationCard({ rec, logged, logBusy, anotherBusy, onLog, onAnother }) {
+  const lines = rec.items || []
   return (
     <Card tone="bg-ink" className="text-white">
       <p className="text-[13px] font-semibold text-brand">Recommended for you</p>
       {rec.error && <p className="mt-2 text-sm text-white/70">Couldn't load recommendations: {rec.error.message}</p>}
-      {rec.items?.length > 0 && (
+      {lines.length > 0 && (
         <ol className="mt-3 space-y-2">
-          {rec.items.map((r, idx) => (
+          {lines.map((r, idx) => (
             <li key={r.item_id ?? r.name} className="flex items-center gap-3 rounded-xl bg-white/5 px-3 py-2.5">
               <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-brand text-[12px] font-bold">{idx + 1}</span>
               <div className="min-w-0 flex-1">
-                <p className="truncate font-medium">
-                  {r.name}
-                  {r.servings !== 1 && <span className="ml-1.5 text-[13px] text-white/60">× {r.servings}</span>}
-                </p>
+                <p className="truncate font-medium">{r.name}</p>
                 <p className="text-[12px] text-white/60">
-                  {fmt(r.kcal)} kcal · {fmt(r.protein_g)}g protein
+                  {amountOf(r)} · {fmt(r.kcal)} kcal · {fmt(r.protein_g)}g protein
                 </p>
               </div>
             </li>
           ))}
         </ol>
       )}
-      {rec.items?.length > 0 && (
+      {lines.length > 0 && (
         <p className="mt-3 text-sm text-white/70">
           Total <span className="font-semibold text-white">{fmt(rec.total.kcal)} kcal</span> · {fmt(rec.total.protein_g)}P {fmt(rec.total.carbs_g)}C{' '}
           {fmt(rec.total.fat_g)}F
         </p>
       )}
       {rec.note && <p className="mt-2 text-[13px] text-white/60">{rec.note}</p>}
+      {lines.length > 0 && (
+        <div className="mt-4 grid grid-cols-2 gap-2">
+          <Button onClick={onLog} disabled={logBusy || logged} className="w-full !py-3">
+            {logged ? 'Logged ✓' : logBusy ? 'Logging…' : 'Log this tray'}
+          </Button>
+          <Button onClick={onAnother} disabled={anotherBusy || logBusy} variant="soft" className="w-full !py-3">
+            {anotherBusy ? 'Finding…' : 'Show me another'}
+          </Button>
+        </div>
+      )}
     </Card>
   )
 }

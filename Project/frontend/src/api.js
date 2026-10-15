@@ -97,7 +97,10 @@ export const getGoal = (userId) => request(`/users/${userId}/goal`)
 
 // ---------- Menus ----------
 
-export const getHalls = (date) => request('/halls', { query: { date } })
+// With `meal` (breakfast, lunch or dinner), only the halls that serve that meal that day
+export const getHalls = (date, meal) => request('/halls', { query: { date, meal } })
+// {"lunch": ["light lunch", "lunch"], "dinner": ["dinner"]}: more than one entry means ask which
+export const getMealOptions = (hall, date) => request('/meal-options', { query: { hall, date } })
 export const getMeals = (hall, date) => request('/meals', { query: { hall, date, main_only: true } })
 export const getMenuItems = ({ hall, date, meal, userId }) =>
   request('/menu-items', { query: { hall, date, meal, user_id: userId } })
@@ -119,7 +122,6 @@ export const getProgress = (userId, date) => request(`/users/${userId}/progress`
 
 // ---------- Recommendations ----------
 
-// Until D's recommend() lands, the backend returns a placeholder pick with a note saying so;
-// it switches over on its own, so nothing changes here.
-export const getRecommendations = ({ userId, hall, date, meal }) =>
-  request('/recommendations/meals', { query: { user_id: userId, hall, date, meal } })
+// `avoid` is a list of item ids to steer away from (the trays already shown), for "Show me another"
+export const getRecommendations = ({ userId, hall, date, meal, avoid = [] }) =>
+  request('/recommendations/meals', { query: { user_id: userId, hall, date, meal, avoid: avoid.join(',') } })
