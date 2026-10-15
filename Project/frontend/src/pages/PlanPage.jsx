@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { addFoodLog, deleteFoodLog, getFoodLogs, getHalls, getMealOptions, getMealTarget, getMenuItems, getRecommendations } from '../api'
 import { Button, Card, ChipScroller, DateChip, ErrorNote, Input, Label, Loading, PageHeader, ProgressRing } from '../components/ui'
-import { ALLERGIES, MEAL_GROUPS, MEAL_SHARE, todayISO } from '../constants'
+import { ALLERGIES, MEAL_GROUPS, todayISO } from '../constants'
+import { fmt, mealLabel, shortHall } from '../format'
 import { getPrefs, setPrefs } from '../session'
 
-const fmt = (n) => (n == null ? '—' : Math.round(n))
 
-// "1.5 × 1/2 Cup", or "2 servings" when the dish has no serving description
-const amountOf = (line) => (line.serving_unit ? `${line.servings} × ${line.serving_unit}` : `${line.servings} ${line.servings === 1 ? 'serving' : 'servings'}`)
+// "1.5 servings (1 Cup each)": the tray line doesn't say how big a serving is, so use the menu item's
+function amountOf(line, item) {
+  const count = `${line.servings} ${line.servings === 1 ? 'serving' : 'servings'}`
+  return item?.serving_size ? `${count} (${`${item.serving_size} ${item.serving_unit || ''}`.trim()} each)` : count
+}
 
 // Herbs, sauces and garnishes under this many kcal are hidden until "Show all"
 const SMALL_KCAL = 20
@@ -26,6 +29,9 @@ function defaultGroup() {
 // A group can have more than one menu (lunch: "light lunch" and "lunch"). Start on the plain one.
 const defaultOption = (options) => options.find((o) => o === 'lunch') || options[0] || null
 
+// A tray as a sorted list of dish ids, to tell whether we have shown it before
+const trayKey = (rec) => (rec.items || []).map((l) => l.item_id).sort((a, b) => a - b).join(',')
+
 // Dish groups, in the order people eat them; anything else follows alphabetically
 const CATEGORY_ORDER = ['Entrees', 'Proteins', 'Starches', 'Vegetables', 'Soups', 'Salads & Salad Bar', 'Appetizers & Sides', 'Breads', 'Cheeses', 'Fruits', 'Desserts']
 const categoryRank = (c) => (CATEGORY_ORDER.includes(c) ? CATEGORY_ORDER.indexOf(c) : CATEGORY_ORDER.length)
@@ -33,12 +39,6 @@ const categoryRank = (c) => (CATEGORY_ORDER.includes(c) ? CATEGORY_ORDER.indexOf
 // The allergens a dish carries, leaving out the labels the dining site mixes in (Kosher, Halal, Local...)
 const ALLERGEN_SET = new Set(ALLERGIES.map((a) => a.toLowerCase()))
 const allergensOf = (item) => (item.allergens || []).filter((a) => ALLERGEN_SET.has(a.toLowerCase()))
-
-// "Ikenberry Dining Center (Ike)" -> "Ike" for the compact buttons; the full name is still what we send
-const shortHall = (hall) => hall.match(/\(([^)]+)\)\s*$/)?.[1] || hall
-
-// "light lunch" -> "Light lunch"
-const mealLabel = (meal) => meal.charAt(0).toUpperCase() + meal.slice(1)
 
 async function loadMealTarget(userId, date, meal) {
   try {
@@ -65,7 +65,9 @@ export default function PlanPage({ user, onSetGoal }) {
   const [showSmall, setShowSmall] = useState(false)
   const [recBusy, setRecBusy] = useState(false)
   const [trayBusy, setTrayBusy] = useState(false)
-  const shownIds = useRef([]) // dishes in the trays already shown for this menu, so "another" is different
+  const [noMore, setNoMore] = useState(false) // "Show me another" ran out of different plates
+  const shownTrays = useRef(new Set()) // the trays already shown for this menu (as sorted id lists)
+  const shownDishes = useRef(new Set()) // every dish in them
 
   // 1. Halls that serve this meal on this date (shops that sell no main meals are not listed)
   const hallsKey = `${date}|${groupPick}`
@@ -101,7 +103,6 @@ export default function PlanPage({ user, onSetGoal }) {
   useEffect(() => {
     if (!menuKey) return
     let ignore = false
-    shownIds.current = []
     Promise.all([
       getMenuItems({ hall, date, meal, userId: user.id }),
       loadMealTarget(user.id, date, meal),
@@ -112,7 +113,11 @@ export default function PlanPage({ user, onSetGoal }) {
         const rec = target.missingGoal
           ? null
           : await getRecommendations({ userId: user.id, hall, date, meal }).catch((error) => ({ error }))
-        if (!ignore) setMenu({ key: menuKey, items, target, logs, rec })
+        if (!ignore) {
+          rememberTray(rec, true)
+          setNoMore(false)
+          setMenu({ key: menuKey, items, target, logs, rec })
+        }
       })
       .catch((error) => !ignore && setMenu({ key: menuKey, error }))
     return () => {
@@ -123,6 +128,8 @@ export default function PlanPage({ user, onSetGoal }) {
 
   // item id -> food log, so a checked dish can be un-checked or have its servings changed
   const logByItem = useMemo(() => new Map((current?.logs || []).map((l) => [l.item_id, l])), [current?.logs])
+
+  const itemsById = useMemo(() => new Map((current?.items || []).map((i) => [i.id, i])), [current?.items])
 
   // What's checked on this menu, for the sticky bar
   const checkedTotal = useMemo(() => {
@@ -168,19 +175,38 @@ export default function PlanPage({ user, onSetGoal }) {
     setPrefs(user.id, { hall: h })
   }
 
-  // Log `servings` of a dish (0 removes it). The API can't edit a log, so a new amount replaces the old log.
+  // The trays already shown, so "Show me another" can tell when it has run out. `reset` starts a new list.
+  function rememberTray(rec, reset = false) {
+    if (reset) {
+      shownTrays.current = new Set()
+      shownDishes.current = new Set()
+    }
+    if (!rec?.items?.length) return
+    shownTrays.current.add(trayKey(rec))
+    rec.items.forEach((l) => shownDishes.current.add(l.item_id))
+  }
+
+  const reloadAfterLogging = async ({ refreshRec = false } = {}) => {
+    const [logs, target] = await Promise.all([getFoodLogs(user.id, date), loadMealTarget(user.id, date, meal)])
+    // Logging by hand shrinks what is left for this meal, so a tray picked for the old budget is stale: ask again
+    const rec = refreshRec && !target.missingGoal ? await getRecommendations({ userId: user.id, hall, date, meal }).catch((error) => ({ error })) : null
+    if (rec) rememberTray(rec, true)
+    setMenu((m) => (m.key === menuKey ? { ...m, logs, target, ...(rec ? { rec } : {}) } : m))
+    if (rec) setNoMore(false)
+  }
+
+  // Log `servings` of a dish (0 removes it). The API can't edit a log, so a new amount replaces the old one:
+  // add the new log first and remove the old one only once that worked, so a failure never loses what was logged.
   const logServings = async (item, servings) => {
     const log = logByItem.get(item.id)
     setActionError('')
     setPending((p) => new Set(p).add(item.id))
     try {
       try {
-        if (log) await deleteFoodLog(user.id, log.id)
         if (servings > 0) await addFoodLog(user.id, item.id, servings)
+        if (log) await deleteFoodLog(user.id, log.id)
       } finally {
-        // Logging changes what's left for this meal, so reload both (also after a half-done change)
-        const [logs, target] = await Promise.all([getFoodLogs(user.id, date), loadMealTarget(user.id, date, meal)])
-        setMenu((m) => (m.key === menuKey ? { ...m, logs, target } : m))
+        await reloadAfterLogging({ refreshRec: true }) // also after a half-done change
       }
       showFlash(servings === 0 ? `Removed ${item.name}` : log ? `${item.name}: ${servings}× logged` : `Logged ${item.name}`)
     } catch (err) {
@@ -194,42 +220,58 @@ export default function PlanPage({ user, onSetGoal }) {
     }
   }
 
-  const reloadAfterLogging = async () => {
-    const [logs, target] = await Promise.all([getFoodLogs(user.id, date), loadMealTarget(user.id, date, meal)])
-    setMenu((m) => (m.key === menuKey ? { ...m, logs, target } : m))
-  }
-
-  // Log every dish of the recommended tray with its servings (replacing a dish that is already logged)
+  // Log every dish of the recommended tray. All-or-nothing as far as we can: add every new log first, undo them if
+  // one fails, and only then remove the entries they replace. The tray's dishes are locked while this runs.
   const logTray = async () => {
     const lines = current?.rec?.items || []
+    const ids = lines.map((l) => l.item_id)
+    const created = []
+    let step = 'adding'
     setActionError('')
     setTrayBusy(true)
+    setPending((p) => new Set([...p, ...ids]))
     try {
-      try {
-        for (const line of lines) {
-          const existing = logByItem.get(line.item_id)
-          if (existing) await deleteFoodLog(user.id, existing.id)
-          await addFoodLog(user.id, line.item_id, line.servings)
-        }
-      } finally {
-        await reloadAfterLogging()
+      for (const line of lines) created.push(await addFoodLog(user.id, line.item_id, line.servings))
+      step = 'replacing'
+      for (const line of lines) {
+        const old = logByItem.get(line.item_id)
+        if (old) await deleteFoodLog(user.id, old.id)
       }
       showFlash(`Logged ${lines.length} ${lines.length === 1 ? 'dish' : 'dishes'}`)
     } catch (err) {
-      setActionError(err.message)
+      if (step === 'adding') {
+        for (const log of created) await deleteFoodLog(user.id, log.id).catch(() => {}) // leave the day as it was
+        setActionError(`Couldn't log this tray, nothing was changed. ${err.message}`)
+      } else {
+        setActionError(`The tray is logged, but an earlier entry couldn't be removed, so a dish may count twice. ${err.message}`)
+      }
     } finally {
+      await reloadAfterLogging().catch((err) => setActionError(err.message))
+      setPending((p) => {
+        const next = new Set(p)
+        ids.forEach((id) => next.delete(id))
+        return next
+      })
       setTrayBusy(false)
     }
   }
 
-  // Ask for a different, similarly good tray: steer away from every dish already shown for this menu
+  // Ask for a different, similarly good tray. First steer away from the tray on screen; if that gives one
+  // already seen, steer away from everything seen; if that repeats too, there is nothing new to show.
   const anotherTray = async () => {
-    shownIds.current = [...new Set([...shownIds.current, ...(current?.rec?.items || []).map((l) => l.item_id)])]
+    const ask = (avoid) => getRecommendations({ userId: user.id, hall, date, meal, avoid })
     setActionError('')
+    setNoMore(false)
     setRecBusy(true)
     try {
-      const rec = await getRecommendations({ userId: user.id, hall, date, meal, avoid: shownIds.current })
-      setMenu((m) => (m.key === menuKey ? { ...m, rec } : m))
+      let rec = await ask((current?.rec?.items || []).map((l) => l.item_id))
+      if (shownTrays.current.has(trayKey(rec))) rec = await ask([...shownDishes.current])
+      if (!rec.items?.length || shownTrays.current.has(trayKey(rec))) {
+        setNoMore(true)
+      } else {
+        rememberTray(rec)
+        setMenu((m) => (m.key === menuKey ? { ...m, rec } : m))
+      }
     } catch (err) {
       setActionError(err.message)
     } finally {
@@ -294,7 +336,16 @@ export default function PlanPage({ user, onSetGoal }) {
         <div className="space-y-4">
           <MealTargetCard target={current.target} meal={meal} group={groupPick} onSetGoal={onSetGoal} />
           {current.rec && (
-            <RecommendationCard rec={current.rec} logged={trayLogged} logBusy={trayBusy} anotherBusy={recBusy} onLog={logTray} onAnother={anotherTray} />
+            <RecommendationCard
+              rec={current.rec}
+              itemsById={itemsById}
+              logged={trayLogged}
+              logBusy={trayBusy}
+              anotherBusy={recBusy}
+              noMore={noMore}
+              onLog={logTray}
+              onAnother={anotherTray}
+            />
           )}
 
           <div className="pt-2">
@@ -439,7 +490,7 @@ function MealTargetCard({ target, meal, group, onSetGoal }) {
         </p>
         {/* consumed_this_meal counts this meal at every hall, so say so */}
         <p className="mt-0.5 text-[13px] text-muted">
-          {mealLabel(group)} is about {MEAL_SHARE[group]}% of your day; it shifts with what you have already logged.
+          {mealLabel(group)} gets {Math.round((100 * budget.kcal) / target.daily_target.kcal)}% of today's {fmt(target.daily_target.kcal)} kcal, after what you have already logged.
         </p>
         <p className="mt-1 text-sm text-muted">
           Logged for {meal} today (any hall): <span className="font-medium text-ink">{fmt(eaten.kcal)} kcal</span>
@@ -461,7 +512,7 @@ function MealTargetCard({ target, meal, group, onSetGoal }) {
   )
 }
 
-function RecommendationCard({ rec, logged, logBusy, anotherBusy, onLog, onAnother }) {
+function RecommendationCard({ rec, itemsById, logged, logBusy, anotherBusy, noMore, onLog, onAnother }) {
   const lines = rec.items || []
   return (
     <Card tone="bg-ink" className="text-white">
@@ -475,7 +526,7 @@ function RecommendationCard({ rec, logged, logBusy, anotherBusy, onLog, onAnothe
               <div className="min-w-0 flex-1">
                 <p className="truncate font-medium">{r.name}</p>
                 <p className="text-[12px] text-white/60">
-                  {amountOf(r)} · {fmt(r.kcal)} kcal · {fmt(r.protein_g)}g protein
+                  {amountOf(r, itemsById.get(r.item_id))} · {fmt(r.kcal)} kcal · {fmt(r.protein_g)}g protein
                 </p>
               </div>
             </li>
@@ -489,6 +540,7 @@ function RecommendationCard({ rec, logged, logBusy, anotherBusy, onLog, onAnothe
         </p>
       )}
       {rec.note && <p className="mt-2 text-[13px] text-white/60">{rec.note}</p>}
+      {noMore && <p className="mt-2 text-[13px] text-white/60">That's all the different plates I can build from this menu.</p>}
       {lines.length > 0 && (
         <div className="mt-4 grid grid-cols-2 gap-2">
           <Button onClick={onLog} disabled={logBusy || logged} className="w-full !py-3">
