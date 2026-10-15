@@ -2,6 +2,10 @@
 Checks for recommend().
 Run:  python -m pytest tests/test_recommend.py
 """
+import json
+import time
+from pathlib import Path
+
 import pytest
 
 from app.recommend import NUTRIENTS, recommend
@@ -60,3 +64,75 @@ def test_empty_menu_and_met_target_return_no_dishes_with_a_note():
     assert recommend(TARGET, [])["items"] == [] and recommend(TARGET, [])["note"]
     done = recommend({k: 0 for k in NUTRIENTS}, MENU)
     assert done["items"] == [] and done["note"]
+
+
+# ---------- rules that make a plate look like a meal ----------
+
+from app.recommend import MIN_LINE_KCAL  # noqa: E402
+
+RULES_MENU = MENU + [
+    {"id": 6, "name": "Fresh Cilantro", "kcal": 0, "protein_g": 0, "carbs_g": 0, "fat_g": 0, "category": "Toppings"},
+    {"id": 7, "name": "Ranch Dressing", "kcal": 140, "protein_g": 0, "carbs_g": 2, "fat_g": 15, "category": "Dressings & Condiments"},
+    {"id": 8, "name": "Soy Sauce", "kcal": 60, "protein_g": 2, "carbs_g": 5, "fat_g": 0, "category": "Entrees"},
+    {"id": 9, "name": "Brownie", "kcal": 220, "protein_g": 3, "carbs_g": 30, "fat_g": 10, "category": "Desserts"},
+    {"id": 10, "name": "Fruit Cup", "kcal": 60, "protein_g": 1, "carbs_g": 15, "fat_g": 0, "category": "Fruits"},
+]
+for _m in RULES_MENU[:4]:
+    _m.setdefault("category", "Entrees")
+RULES_MENU[3]["category"] = "Desserts"  # the Cookie
+
+
+def test_skips_sauces_dressings_and_herbs():
+    names = {line["name"] for line in recommend(TARGET, RULES_MENU)["items"]}
+    assert not names & {"Fresh Cilantro", "Ranch Dressing", "Soy Sauce"}
+
+
+def test_at_most_one_dessert_and_one_serving_of_it():
+    for target in (TARGET, {"kcal": 900, "protein_g": 20, "carbs_g": 150, "fat_g": 40}):
+        lines = [l for l in recommend(target, RULES_MENU)["items"] if l["name"] in {"Cookie", "Brownie"}]
+        assert len(lines) <= 1 and all(l["servings"] <= 1 for l in lines)
+
+
+def test_every_dish_adds_a_meaningful_amount():
+    for line in recommend(TARGET, RULES_MENU)["items"]:
+        assert line["kcal"] >= MIN_LINE_KCAL - 1
+
+
+def test_a_normal_meal_has_at_least_two_dishes():
+    assert len(recommend(TARGET, RULES_MENU)["items"]) >= 2
+
+
+def test_a_menu_of_only_sauces_still_returns_something_rather_than_nothing():
+    sauces = [m for m in RULES_MENU if m["id"] in (7, 8)]
+    assert recommend({"kcal": 200, "protein_g": 5, "carbs_g": 20, "fat_g": 10}, sauces)["items"]
+
+
+def test_duplicate_dish_names_count_once():
+    names = [l["name"] for l in recommend(TARGET, RULES_MENU + [dict(RULES_MENU[0], id=99)])["items"]]
+    assert names.count("Chicken") <= 1
+
+
+SAMPLE = Path(__file__).resolve().parent.parent / "data" / "menu_sample.json"
+
+
+@pytest.mark.skipif(not SAMPLE.exists(), reason="sample menu not in the repo")
+def test_real_menus_give_plates_that_look_like_meals_and_hit_the_target():
+    data = json.loads(SAMPLE.read_text())
+    menus = {}
+    for i in data:
+        menus.setdefault((i["hall"], i["date"], i["meal"]), []).append(dict(i, id=i["source_id"]))
+    big = [(k, v) for k, v in sorted(menus.items()) if len(v) >= 8][::3]
+    assert len(big) >= 8
+    target = {"kcal": 600, "protein_g": 45, "carbs_g": 65, "fat_g": 18}
+    close, start = 0, time.time()
+    for key, items in big:
+        by_id = {i["id"]: i for i in items}
+        lines = recommend(dict(target), items)["items"]
+        assert 2 <= len(lines) <= 5, key
+        assert all(l["kcal"] >= MIN_LINE_KCAL - 1 for l in lines), key
+        assert sum("dessert" in (by_id[l["item_id"]].get("category") or "").lower() for l in lines) <= 1, key
+        assert not any(w in (by_id[l["item_id"]].get("category") or "").lower() for l in lines for w in ("sauce", "dressing", "condiment", "beverage")), key
+        total = {k: sum(l[k] for l in lines) for k in NUTRIENTS}
+        close += all(abs(total[k] - target[k]) <= 0.15 * target[k] for k in NUTRIENTS)
+    assert close >= 0.8 * len(big)  # most plates land within 15% on every nutrient
+    assert (time.time() - start) / len(big) < 0.5  # seconds per menu

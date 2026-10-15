@@ -338,17 +338,19 @@ def _is_valid_recommendation(result) -> bool:
 
 
 @app.get("/recommendations/meals")
-def recommend_meal(user_id: int, hall: str, date: date, meal: str, session: SessionDep, seed: int | None = None):
+def recommend_meal(user_id: int, hall: str, date: date, meal: str, session: SessionDep, avoid: str | None = None):
     """
     Recommended dishes for one meal: aims at the meal's target from GET /users/{id}/meal-target,
     choosing among the dishes from GET /menu-items?user_id= (allergies and restrictions applied).
-    A different `seed` gives a different, similarly good option ("show me another"); without one the
-    answer is always the same. If recommend() is missing, errors, or returns something malformed, a
-    simple placeholder in the same shape is returned instead, so the page never breaks.
+    `avoid` is a comma-separated list of item ids to steer away from; send the ids of the tray the user
+    is looking at to get a different, similarly good one ("show me another"). Without it the answer is
+    always the same. If recommend() is missing, errors, or returns something malformed, a simple
+    placeholder in the same shape is returned instead, so the page never breaks.
     """
     target = read_meal_target(user_id, date, meal, session)["target"]
     items = list_menu_items(hall, date, session, meal=meal, user_id=user_id)
-    kwargs = {"seed": seed} if seed is not None and "seed" in inspect.signature(recommend).parameters else {}
+    avoid_ids = [int(x) for x in (avoid or "").split(",") if x.strip().isdigit()]
+    kwargs = {"avoid_ids": avoid_ids} if avoid_ids and "avoid_ids" in inspect.signature(recommend).parameters else {}
     try:
         result = recommend(target, [item.model_dump() for item in items], **kwargs)
     except NotImplementedError:

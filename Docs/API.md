@@ -117,8 +117,8 @@ What is left to eat at this meal. What was logged at other meals is subtracted f
 `404` if the user has no goal yet; `422` if `meal` is not breakfast, lunch, light lunch, dinner, kosher lunch or kosher dinner.
 Meal weights: breakfast 0.25, lunch / light lunch 0.35, dinner 0.40 (renormalised over this meal and the meals with nothing logged yet).
 
-### `GET /recommendations/meals?user_id=&hall=&date=&meal=&seed=` ✅ (D's `recommend()` in `app/recommend.py`)
-Recommended dishes for one meal. Without `seed` the answer is always the same; a different `seed` (any integer) gives a different, similarly good option, for a "show me another" button. If `recommend()` is missing, errors, or returns something malformed, a simple placeholder in the same shape is returned (with an explanatory `note`), so the page never breaks.
+### `GET /recommendations/meals?user_id=&hall=&date=&meal=&avoid=` ✅ (D's `recommend()` in `app/recommend.py`)
+Recommended dishes for one meal. Without `avoid` the answer is always the same. For a "show me another" button, send `avoid` = the `item_id`s of the tray on screen, comma-separated (e.g. `&avoid=1234,1250,1311`): those dishes are steered away from and a different, similarly good tray comes back. If `recommend()` is missing, errors, or returns something malformed, a simple placeholder in the same shape is returned (with an explanatory `note`), so the page never breaks.
 ```json
 {
   "items": [
