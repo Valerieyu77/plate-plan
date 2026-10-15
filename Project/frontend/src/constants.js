@@ -32,5 +32,3 @@ export function todayISO() {
 // The three meals people think in. The data keeps the dining site's own names (light lunch, kosher lunch...),
 // which the backend groups under these (see GET /meal-options).
 export const MEAL_GROUPS = ['breakfast', 'lunch', 'dinner']
-// Share of the day's target each meal usually gets (it shifts with what you have already logged)
-export const MEAL_SHARE = { breakfast: 25, lunch: 35, dinner: 40 }

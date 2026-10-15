@@ -101,7 +101,6 @@ export const getGoal = (userId) => request(`/users/${userId}/goal`)
 export const getHalls = (date, meal) => request('/halls', { query: { date, meal } })
 // {"lunch": ["light lunch", "lunch"], "dinner": ["dinner"]}: more than one entry means ask which
 export const getMealOptions = (hall, date) => request('/meal-options', { query: { hall, date } })
-export const getMeals = (hall, date) => request('/meals', { query: { hall, date, main_only: true } })
 export const getMenuItems = ({ hall, date, meal, userId }) =>
   request('/menu-items', { query: { hall, date, meal, user_id: userId } })
 
