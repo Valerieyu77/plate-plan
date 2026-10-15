@@ -1,39 +1,78 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { getHallPicks } from '../api'
-import { Card, Label } from './ui'
+import { fmt, shortHall } from '../format'
+import { Button, Card, Label } from './ui'
 
-const fmt = (n) => (n == null ? '—' : Math.round(n))
-const shortHall = (hall) => hall.match(/\(([^)]+)\)\s*$/)?.[1] || hall
 // Scores within this many points of the best count as the same: a point or two between big halls means nothing
 const TIE = 2
+// ...and a hall is only a "great match" if its plate really fits, however the others did
+const GREAT_MIN = 75
+// After the first look, wait this long once something is logged, so a run of stepper taps asks only once
+const REFRESH_DELAY_MS = 500
 
 // "Where should I eat?": every hall that serves this meal, ranked by how well the best plate there
 // fits what the user still needs, plus the plate with the most protein inside the same calories.
-// Tap a hall to open it. Shows nothing without a goal (the meal card asks for one) or if it can't load.
+// Tap a hall to open it. `version` goes up whenever something is logged, which re-runs the comparison.
 export default function HallPicks({ userId, date, group, hall, onPickHall, version }) {
-  const [state, setState] = useState({ key: null })
-  const key = `${userId}|${date}|${group}|${version}`
+  const scope = `${userId}|${date}|${group}`
+  const [state, setState] = useState({ scope: null })
+  const [attempt, setAttempt] = useState(0)
+  const loadedScope = useRef(null)
 
   useEffect(() => {
     let ignore = false
-    getHallPicks(userId, date, group)
-      .then((picks) => !ignore && setState({ key, picks }))
-      .catch((error) => !ignore && setState({ key, error }))
+    // A new day or meal loads at once; a change to what is logged waits a moment and keeps the old picks on screen
+    const timer = setTimeout(
+      () => {
+        getHallPicks(userId, date, group)
+          .then((picks) => {
+            if (ignore) return
+            loadedScope.current = scope
+            setState({ scope, picks })
+          })
+          .catch((error) => !ignore && setState((s) => (s.scope === scope && s.picks ? s : { scope, error })))
+      },
+      loadedScope.current === scope ? REFRESH_DELAY_MS : 0,
+    )
     return () => {
       ignore = true
+      clearTimeout(timer)
     }
-  }, [key, userId, date, group])
+  }, [scope, userId, date, group, version, attempt])
 
-  if (state.key !== key) return <Card className="text-sm text-muted">Comparing dining halls…</Card>
-  if (state.error) return null
-  if (!state.picks.halls.length) {
-    // Nothing left to compare: say so when it is because the meal's budget is used up
-    return state.picks.target.kcal < 50 ? <Card className="text-sm text-muted">You have used up your {group} budget today, so there is nothing left to compare.</Card> : null
+  const retry = () => {
+    loadedScope.current = null
+    setState({ scope: null })
+    setAttempt((a) => a + 1)
   }
 
-  const { halls, best_protein: bestProtein } = state.picks
+  if (state.scope !== scope) return <Card className="text-sm text-muted">Comparing dining halls…</Card>
+
+  if (state.error) {
+    const { status, message } = state.error
+    // No goal yet (the meal card asks for one) or the server doesn't have this feature yet: show nothing
+    if (status === 404 && (/goal/i.test(message) || message === 'Not Found')) return null
+    return (
+      <Card className="flex items-center justify-between gap-3 text-sm text-muted">
+        <span>Couldn't compare halls. {message}</span>
+        <Button variant="soft" onClick={retry} className="shrink-0 !px-4 !py-2">
+          Try again
+        </Button>
+      </Card>
+    )
+  }
+
+  const { halls, best_protein: bestProtein, target } = state.picks
+  if (!halls.length) {
+    return (
+      <Card className="text-sm text-muted">
+        {target.kcal < 50 ? `You have used up your ${group} budget today, so there is nothing left to compare.` : `No hall has a plate that fits your allergies and diet for ${group}.`}
+      </Card>
+    )
+  }
+
   const top = halls[0].match
-  const protein = halls.find((h) => h.hall === bestProtein)
+  const protein = halls.find((h) => h.hall === bestProtein && h.high_protein.items.length > 0)
 
   return (
     <Card>
@@ -43,7 +82,7 @@ export default function HallPicks({ userId, date, group, hall, onPickHall, versi
       <ul className="mt-3 space-y-1.5">
         {halls.map((h) => {
           const selected = h.hall === hall
-          const great = top - h.match <= TIE
+          const great = h.match >= GREAT_MIN && top - h.match <= TIE
           return (
             <li key={h.hall}>
               <button
@@ -74,14 +113,12 @@ export default function HallPicks({ userId, date, group, hall, onPickHall, versi
 
       {protein && (
         <div className="mt-4 rounded-xl bg-ink p-3.5 text-white">
-          <p className="text-[13px] font-semibold text-brand">Highest-protein plate today</p>
+          <p className="text-[13px] font-semibold text-brand">Highest-protein {group} plate</p>
           <p className="mt-1 text-[15px] font-semibold">
             {shortHall(protein.hall)}: {fmt(protein.high_protein.total.protein_g)} g protein
             <span className="font-normal text-white/70"> in {fmt(protein.high_protein.total.kcal)} kcal ({protein.high_protein.protein_share}% of calories)</span>
           </p>
-          <p className="mt-1 text-[13px] text-white/70">
-            {protein.high_protein.items.map((l) => `${l.servings}× ${l.name}`).join(' · ')}
-          </p>
+          <p className="mt-1 text-[13px] text-white/70">{protein.high_protein.items.map((l) => `${l.servings}× ${l.name}`).join(' · ')}</p>
           {protein.hall !== hall && (
             <button type="button" onClick={() => onPickHall(protein.hall)} className="mt-2.5 text-[13px] font-semibold text-brand">
               Open {shortHall(protein.hall)} →

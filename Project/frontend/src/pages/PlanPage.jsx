@@ -66,6 +66,7 @@ export default function PlanPage({ user, onSetGoal }) {
   const [showSmall, setShowSmall] = useState(false)
   const [recBusy, setRecBusy] = useState(false)
   const [trayBusy, setTrayBusy] = useState(false)
+  const [logVersion, setLogVersion] = useState(0) // goes up after every change to what is logged
   const [noMore, setNoMore] = useState(false) // "Show me another" ran out of different plates
   const shownTrays = useRef(new Set()) // the trays already shown for this menu (as sorted id lists)
   const shownDishes = useRef(new Set()) // every dish in them
@@ -194,6 +195,7 @@ export default function PlanPage({ user, onSetGoal }) {
     if (rec) rememberTray(rec, true)
     setMenu((m) => (m.key === menuKey ? { ...m, logs, target, ...(rec ? { rec } : {}) } : m))
     if (rec) setNoMore(false)
+    setLogVersion((v) => v + 1)
   }
 
   // Log `servings` of a dish (0 removes it). The API can't edit a log, so a new amount replaces the old one:
@@ -330,7 +332,7 @@ export default function PlanPage({ user, onSetGoal }) {
 
       {hall && (
         <div className="mt-5">
-          <HallPicks userId={user.id} date={date} group={groupPick} hall={hall} onPickHall={pickHall} version={current?.target?.consumed_this_meal?.kcal ?? 0} />
+          <HallPicks userId={user.id} date={date} group={groupPick} hall={hall} onPickHall={pickHall} version={logVersion} />
         </div>
       )}
 
