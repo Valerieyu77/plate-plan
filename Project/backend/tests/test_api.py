@@ -377,3 +377,79 @@ def test_full_user_journey(client):
 
     assert client.delete(f"/users/{uid}/food-logs/{log['id']}").status_code == 204
     assert client.get(f"/users/{uid}/progress", params={"date": DAY}).json()["actual"]["kcal"] == 0
+
+
+
+# ---------- today's best picks across halls ----------
+
+PAR = "Pennsylvania Avenue Dining Hall (PAR)"
+
+
+def add_poor_lunch_hall(client):
+    """A hall whose only lunch dish is one huge pizza: it can't build a plate that fits a ~600 kcal lunch."""
+    from datetime import date as d
+    session = next(app.dependency_overrides[get_session]())
+    session.add(MenuItem(source_id="p1", date=d(2026, 10, 8), hall=PAR, meal="lunch", name="Mega Pizza", category="Entrees",
+                         kcal=900, protein_g=20, carbs_g=100, fat_g=40, allergens=[], is_recommendable=True))
+    session.commit()
+
+
+def test_hall_picks_rank_halls_by_how_well_a_plate_fits(client):
+    add_poor_lunch_hall(client)
+    uid = make_user(client, allergies=["Milk"])
+    client.put(f"/users/{uid}/goal", json={"goal_type": "maintain"})
+    r = client.get(f"/users/{uid}/hall-picks", params={"date": DAY, "meal": "lunch"}).json()
+    halls = [h["hall"] for h in r["halls"]]
+    assert halls == [ISR, PAR] and r["best_match"] == ISR
+    scores = [h["match"] for h in r["halls"]]
+    assert scores == sorted(scores, reverse=True) and scores[0] > scores[1]
+    isr = r["halls"][0]
+    assert "Cheese Pizza" not in [i["name"] for i in isr["tray"]["items"]]  # Milk allergy respected
+    assert isr["high_protein"]["items"] and isr["high_protein"]["protein_share"] > 0
+    assert r["best_protein"] in halls and r["target"]["kcal"] > 0
+
+
+def test_hall_picks_only_lists_halls_that_serve_the_meal(client):
+    add_poor_lunch_hall(client)
+    uid = make_user(client)
+    client.put(f"/users/{uid}/goal", json={"goal_type": "maintain"})
+    r = client.get(f"/users/{uid}/hall-picks", params={"date": DAY, "meal": "dinner"}).json()
+    assert [h["hall"] for h in r["halls"]] == [ISR]  # PAR has no dinner in this test data
+
+
+def test_hall_picks_with_nothing_to_show_and_bad_requests(client):
+    uid = make_user(client)
+    assert client.get(f"/users/{uid}/hall-picks", params={"date": DAY, "meal": "lunch"}).status_code == 404  # no goal yet
+    client.put(f"/users/{uid}/goal", json={"goal_type": "maintain"})
+    assert client.get(f"/users/{uid}/hall-picks", params={"date": DAY, "meal": "snack"}).status_code == 422
+    r = client.get(f"/users/{uid}/hall-picks", params={"date": "2026-12-01", "meal": "lunch"}).json()
+    assert r["halls"] == [] and r["best_match"] is None and r["best_protein"] is None
+    assert client.get("/users/999/hall-picks", params={"date": DAY, "meal": "lunch"}).status_code == 404
+
+
+def test_hall_picks_follow_what_was_already_logged(client):
+    uid = make_user(client)
+    client.put(f"/users/{uid}/goal", json={"goal_type": "maintain"})
+    before = client.get(f"/users/{uid}/hall-picks", params={"date": DAY, "meal": "lunch"}).json()["target"]["kcal"]
+    item = client.get("/menu-items", params={"hall": ISR, "date": DAY, "meal": "lunch"}).json()[0]["id"]
+    client.post(f"/users/{uid}/food-logs", json={"item_id": item, "servings": 1})
+    after = client.get(f"/users/{uid}/hall-picks", params={"date": DAY, "meal": "lunch"}).json()["target"]["kcal"]
+    assert after < before
+
+
+def test_best_protein_never_names_a_hall_without_a_high_protein_plate(client, monkeypatch):
+    import app.main as main
+    real = main.recommend
+
+    def no_protein_plate(target, items, **kwargs):
+        # the high-protein request has a 40%-protein split; make it come back empty for every hall
+        if target["protein_g"] * 4 >= 0.39 * target["kcal"]:
+            return {"items": [], "total": {"kcal": 0, "protein_g": 0, "carbs_g": 0, "fat_g": 0}, "target": target, "note": "none"}
+        return real(target, items, **kwargs)
+
+    monkeypatch.setattr(main, "recommend", no_protein_plate)
+    uid = make_user(client)
+    client.put(f"/users/{uid}/goal", json={"goal_type": "maintain"})
+    r = client.get(f"/users/{uid}/hall-picks", params={"date": DAY, "meal": "lunch"}).json()
+    assert r["halls"] and r["best_match"]  # the hall comparison still works
+    assert r["best_protein"] is None

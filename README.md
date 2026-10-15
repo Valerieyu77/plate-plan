@@ -85,6 +85,7 @@ The full specification, with request and response examples for every endpoint, i
 | `POST/GET/DELETE /users/{id}/food-logs` | Log, list and un-check eaten dishes | Done |
 | `POST/GET /users/{id}/weight-logs` | Log and list weigh-ins | Done |
 | `GET /users/{id}/progress` | Target vs actual for a day, plus weight history | Done |
+| `GET /users/{id}/hall-picks` | Which hall fits the user's next meal best (match score) and a high-protein plate per hall | Done |
 | `GET /recommendations/meals` | Recommended dishes for a meal (never breaks: falls back to a placeholder) | Done |
 
 ## Menu data
