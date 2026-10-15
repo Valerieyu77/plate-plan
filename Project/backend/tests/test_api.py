@@ -236,3 +236,144 @@ def test_recommendation_needs_a_goal(client):
     r = client.get("/recommendations/meals", params={
         "user_id": uid, "hall": "Illinois Street Dining Center (ISR)", "date": DAY, "meal": "lunch"})
     assert r.status_code == 404
+
+
+
+# ---------- meal picker: halls by meal, meal options ----------
+
+def add_ike(client):
+    """An extra hall with both a light lunch and a lunch (like the real Ike), and no dinner."""
+    from datetime import date as d
+    session = next(app.dependency_overrides[get_session]())
+    for sid, meal in (("i1", "light lunch"), ("i2", "lunch"), ("i3", "breakfast")):
+        session.add(MenuItem(source_id=sid, date=d(2026, 10, 8), hall="Ikenberry Dining Center (Ike)", meal=meal,
+                             name=f"{meal} dish", kcal=300, protein_g=10, carbs_g=30, fat_g=10, is_recommendable=True))
+    session.commit()
+
+
+def test_halls_can_be_filtered_by_meal(client):
+    add_ike(client)
+    IKE = "Ikenberry Dining Center (Ike)"
+    assert client.get("/halls", params={"date": DAY, "meal": "lunch"}).json() == [IKE, ISR]  # light lunch counts as lunch
+    assert client.get("/halls", params={"date": DAY, "meal": "dinner"}).json() == [ISR]
+    assert client.get("/halls", params={"date": DAY, "meal": "breakfast"}).json() == [IKE]
+    assert client.get("/halls", params={"date": DAY, "meal": "light lunch"}).json() == [IKE]  # raw name: only itself
+    assert client.get("/halls", params={"date": DAY, "meal": "Lunch"}).json() == [IKE, ISR]  # case-insensitive
+
+
+def test_meal_options_group_light_lunch_under_lunch(client):
+    add_ike(client)
+    r = client.get("/meal-options", params={"hall": "Ikenberry Dining Center (Ike)", "date": DAY}).json()
+    assert r == {"breakfast": ["breakfast"], "lunch": ["light lunch", "lunch"]}
+    assert list(r) == ["breakfast", "lunch"]  # time-of-day order
+    assert client.get("/meal-options", params={"hall": ISR, "date": DAY}).json() == {"lunch": ["lunch"], "dinner": ["dinner"]}
+    assert client.get("/meal-options", params={"hall": "Nowhere", "date": DAY}).json() == {}
+
+
+# ---------- the recommendation endpoint never breaks the page ----------
+
+def _ready_user(client):
+    uid = make_user(client)
+    client.put(f"/users/{uid}/goal", json={"goal_type": "maintain"})
+    return uid, {"user_id": uid, "hall": ISR, "date": DAY, "meal": "lunch"}
+
+
+def test_recommendation_falls_back_when_recommend_raises(client, monkeypatch):
+    import app.main as main
+
+    def boom(target, items, max_servings=3.0):
+        raise ValueError("bug in someone's code")
+
+    monkeypatch.setattr(main, "recommend", boom)
+    uid, params = _ready_user(client)
+    r = client.get("/recommendations/meals", params=params)
+    assert r.status_code == 200
+    assert "unavailable" in r.json()["note"] and r.json()["items"]
+
+
+def test_recommendation_falls_back_on_a_malformed_result(client, monkeypatch):
+    import app.main as main
+    monkeypatch.setattr(main, "recommend", lambda target, items, max_servings=3.0: {"nonsense": True})
+    uid, params = _ready_user(client)
+    r = client.get("/recommendations/meals", params=params)
+    assert r.status_code == 200 and "unavailable" in r.json()["note"]
+
+
+def test_a_valid_recommendation_is_passed_through_unchanged(client, monkeypatch):
+    import app.main as main
+    good = {"items": [{"item_id": 1, "name": "X", "servings": 1.5, "kcal": 450, "protein_g": 30, "carbs_g": 40, "fat_g": 15}],
+            "total": {"kcal": 450, "protein_g": 30, "carbs_g": 40, "fat_g": 15},
+            "target": {"kcal": 500, "protein_g": 35, "carbs_g": 45, "fat_g": 16}, "note": None}
+    monkeypatch.setattr(main, "recommend", lambda target, items, max_servings=3.0: good)
+    uid, params = _ready_user(client)
+    assert client.get("/recommendations/meals", params=params).json() == good
+
+
+def test_seed_is_only_passed_to_a_recommend_that_accepts_it(client, monkeypatch):
+    import app.main as main
+    seen = {}
+
+    def with_seed(target, items, max_servings=3.0, seed=None):
+        seen["seed"] = seed
+        return {"items": [], "total": {"kcal": 0, "protein_g": 0, "carbs_g": 0, "fat_g": 0}, "target": target, "note": None}
+
+    monkeypatch.setattr(main, "recommend", with_seed)
+    uid, params = _ready_user(client)
+    client.get("/recommendations/meals", params={**params, "seed": 7})
+    assert seen["seed"] == 7
+    monkeypatch.setattr(main, "recommend", lambda target, items, max_servings=3.0: good_empty(target))
+    assert client.get("/recommendations/meals", params={**params, "seed": 7}).status_code == 200  # no TypeError
+
+
+def good_empty(target):
+    return {"items": [], "total": {"kcal": 0, "protein_g": 0, "carbs_g": 0, "fat_g": 0}, "target": target, "note": None}
+
+
+def test_placeholder_skips_herbs_and_sauces(client):
+    from datetime import date as d
+    session = next(app.dependency_overrides[get_session]())
+    session.add(MenuItem(source_id="h1", date=d(2026, 10, 8), hall=ISR, meal="lunch", name="Fresh Cilantro",
+                         kcal=0, protein_g=0, carbs_g=0, fat_g=0, is_recommendable=True))
+    session.commit()
+    uid, params = _ready_user(client)
+    names = [i["name"] for i in client.get("/recommendations/meals", params=params).json()["items"]]
+    assert "Fresh Cilantro" not in names
+
+
+# ---------- one full user journey, end to end ----------
+
+def test_full_user_journey(client):
+    """Sign up -> goal -> pick meal and hall -> target -> dishes -> recommendation -> log -> progress -> undo."""
+    uid = make_user(client, allergies=["Milk"], dietary_restrictions=[])
+    goal = client.put(f"/users/{uid}/goal", json={"goal_type": "lose"}).json()
+    assert goal["calorie_goal"] > 1000
+
+    assert client.get("/halls", params={"date": DAY, "meal": "lunch"}).json() == [ISR]
+    assert client.get("/meal-options", params={"hall": ISR, "date": DAY}).json()["lunch"] == ["lunch"]
+
+    target = client.get(f"/users/{uid}/meal-target", params={"date": DAY, "meal": "lunch"}).json()
+    # nothing logged yet: lunch gets its 35% of the day
+    assert target["target"]["kcal"] == pytest.approx(goal["calorie_goal"] * 0.35, abs=1)
+
+    dishes = client.get("/menu-items", params={"hall": ISR, "date": DAY, "meal": "lunch", "user_id": uid}).json()
+    names = {d["name"] for d in dishes}
+    assert "Cheese Pizza" not in names and "Grilled Chicken" in names  # Milk allergy respected
+
+    rec = client.get("/recommendations/meals", params={"user_id": uid, "hall": ISR, "date": DAY, "meal": "lunch"}).json()
+    assert rec["items"] and rec["target"] == target["target"]
+    assert all(line["name"] in names for line in rec["items"])  # only dishes this user may eat
+
+    first = rec["items"][0]
+    log = client.post(f"/users/{uid}/food-logs", json={"item_id": first["item_id"], "servings": first["servings"]}).json()
+    after = client.get(f"/users/{uid}/meal-target", params={"date": DAY, "meal": "lunch"}).json()
+    assert after["consumed_this_meal"]["kcal"] == pytest.approx(first["kcal"], abs=1)
+    assert after["target"]["kcal"] < target["target"]["kcal"]
+
+    progress = client.get(f"/users/{uid}/progress", params={"date": DAY}).json()
+    assert progress["actual"]["kcal"] == pytest.approx(first["kcal"], abs=1)
+
+    client.post(f"/users/{uid}/weight-logs", json={"date": DAY, "weight_lbs": 139.0})
+    assert client.get(f"/users/{uid}/progress", params={"date": DAY}).json()["weight_trend"][-1]["weight_lbs"] == 139.0
+
+    assert client.delete(f"/users/{uid}/food-logs/{log['id']}").status_code == 204
+    assert client.get(f"/users/{uid}/progress", params={"date": DAY}).json()["actual"]["kcal"] == 0

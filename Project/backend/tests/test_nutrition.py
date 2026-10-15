@@ -160,15 +160,22 @@ def test_goal_to_targets_treats_unset_as_zero():
 
 # ---------- macros must fit inside the calorie target ----------
 
-def test_macros_are_scaled_to_fit_the_calories_left():
-    # lots of kcal eaten but little protein/carbs/fat counted against the day: the raw leftovers
-    # (protein 44 g, carbs 93 g, fat ~5 g) would need ~590 kcal, but only ~233 kcal are left
+def test_macros_are_scaled_to_fit_the_calories_left_keeping_protein():
+    # raw leftovers for lunch would be protein ~44 g, carbs ~93 g, fat ~5 g (about 590 kcal) but only ~233 kcal are left
     eaten = {"breakfast": {"kcal": 1500, "protein_g": 5, "carbs_g": 50, "fat_g": 50}}
     t = meal_target(DAILY, eaten, "lunch")["target"]
     implied = 4 * t["protein_g"] + 4 * t["carbs_g"] + 9 * t["fat_g"]
     assert implied <= t["kcal"] + 1
     assert t["kcal"] == pytest.approx(500 * 0.35 / 0.75, abs=0.1)  # calories are not touched
-    assert t["protein_g"] / t["carbs_g"] == pytest.approx(95 / 200, rel=0.05)  # proportions are kept
+    assert t["protein_g"] == pytest.approx(95 * 0.35 / 0.75, abs=0.1)  # protein is kept first
+    assert t["carbs_g"] / t["fat_g"] == pytest.approx(200 / 10, rel=0.1)  # carbs and fat keep their ratio
+
+
+def test_when_not_even_the_protein_fits_all_calories_go_to_protein():
+    eaten = {"breakfast": {"kcal": 1900, "protein_g": 0, "carbs_g": 0, "fat_g": 0}}
+    t = meal_target(DAILY, eaten, "dinner")["target"]
+    assert t["carbs_g"] == 0 and t["fat_g"] == 0
+    assert t["protein_g"] == pytest.approx(t["kcal"] / 4, abs=0.1)
 
 
 def test_macros_are_left_alone_when_they_already_fit():
@@ -181,3 +188,20 @@ def test_everything_is_zero_when_no_calories_are_left():
     eaten = {"breakfast": {"kcal": 2600, "protein_g": 10, "carbs_g": 10, "fat_g": 10}}
     t = meal_target(DAILY, eaten, "dinner")["target"]
     assert t == {"kcal": 0, "protein_g": 0, "carbs_g": 0, "fat_g": 0}
+
+
+# ---------- meal groups ----------
+
+from app.nutrition import MEAL_GROUP, meals_in_group  # noqa: E402
+
+
+def test_meals_in_group():
+    assert meals_in_group("lunch") == ["light lunch", "lunch", "kosher lunch"]
+    assert meals_in_group("Dinner") == ["dinner", "kosher dinner"]
+    assert meals_in_group("breakfast") == ["breakfast"]
+    assert meals_in_group("Light Lunch") == ["light lunch"]  # a raw name only matches itself
+
+
+def test_every_meal_has_a_group_and_a_slot():
+    from app.nutrition import MEAL_SLOT
+    assert set(MEAL_GROUP) == set(MEAL_SLOT)
