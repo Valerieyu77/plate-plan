@@ -15,6 +15,7 @@ from .models import (
 )
 from .dietary import allowed_for_user
 from .recommend import recommend
+from .picks import high_protein_target, match_score, protein_share
 from .nutrition import (
     GROUP_ORDER, MEAL_GROUP, MEAL_ORDER, NUTRIENTS, add_nutrients, daily_targets, day_progress, goal_to_targets,
     item_nutrients, meal_target, meals_in_group, zero_nutrients,
@@ -362,3 +363,58 @@ def recommend_meal(user_id: int, hall: str, date: date, meal: str, session: Sess
         log.error("recommend() returned a malformed result: %r", result)
         return _placeholder_recommendation(target, items, "Recommendation engine unavailable; showing a simple placeholder.")
     return result
+
+
+# ---------- Today's best picks across halls ----------
+
+def _default_option(options: list[str]) -> str:
+    """When a hall has several menus for a meal (light lunch, lunch), compare on the plain one."""
+    return "lunch" if "lunch" in options else options[0]
+
+
+@app.get("/users/{user_id}/hall-picks")
+def hall_picks(user_id: int, date: date, meal: str, session: SessionDep):
+    """
+    Which hall suits the user best for a meal ("breakfast", "lunch" or "dinner"): at every hall that
+    serves it, build the best plate for what the user still needs at that meal and say how well it
+    matches (0-100), plus a high-protein plate that stays inside the same calories. Halls are sorted
+    by match. Allergies and diet are respected; halls where nothing is left to eat are left out.
+    """
+    group = meal.strip().lower()
+    if group not in GROUP_ORDER:
+        raise HTTPException(status_code=422, detail=f"meal must be one of {GROUP_ORDER}")
+    target = read_meal_target(user_id, date, group, session)["target"]
+
+    results = []
+    for hall in list_halls(session, date=date, meal=group):
+        options = meal_options(hall, date, session).get(group)
+        if not options:
+            continue
+        chosen = _default_option(options)
+        items = list_menu_items(hall, date, session, meal=chosen, user_id=user_id)
+        dishes = [item.model_dump() for item in items]
+        try:
+            tray = recommend(target, dishes)
+            protein_plate = recommend(high_protein_target(target["kcal"]), dishes)
+        except Exception:
+            log.exception("hall-picks: recommend() failed for %s", hall)
+            continue
+        if not tray.get("items"):
+            continue
+        results.append({
+            "hall": hall,
+            "meal": chosen,
+            "match": match_score(target, tray["total"]),
+            "tray": {"items": tray["items"], "total": tray["total"], "note": tray["note"]},
+            "high_protein": {
+                "items": protein_plate["items"], "total": protein_plate["total"],
+                "protein_share": protein_share(protein_plate["total"]), "note": protein_plate["note"],
+            },
+        })
+    results.sort(key=lambda r: (-r["match"], r["hall"]))
+    best_protein = max(results, key=lambda r: r["high_protein"]["total"]["protein_g"], default=None)
+    return {
+        "date": date, "meal": group, "target": target, "halls": results,
+        "best_match": results[0]["hall"] if results else None,
+        "best_protein": best_protein["hall"] if best_protein else None,
+    }

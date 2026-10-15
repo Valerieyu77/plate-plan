@@ -117,6 +117,24 @@ What is left to eat at this meal. What was logged at other meals is subtracted f
 `404` if the user has no goal yet; `422` if `meal` is not breakfast, lunch, light lunch, dinner, kosher lunch or kosher dinner.
 Meal weights: breakfast 0.25, lunch / light lunch 0.35, dinner 0.40 (renormalised over this meal and the meals with nothing logged yet).
 
+### `GET /users/{id}/hall-picks?date=&meal=` ✅
+Which hall suits the user best for a meal (`breakfast`, `lunch` or `dinner`). At every hall that serves it, the best plate for what the user still needs at that meal is built (same logic as the recommendation), and scored: `match` is 0 to 100, how close the plate gets to the four targets (calories and protein count most). Each hall also gets a **high-protein plate** that stays inside the same calories (about 40% of calories from protein). Allergies and diet are respected. Halls are sorted by `match`; a hall where nothing is left to eat is left out. `404` without a goal, `422` for another meal name.
+```json
+{
+  "date": "2026-10-16", "meal": "lunch",
+  "target": { "kcal": 591, "protein_g": 44, "carbs_g": 66, "fat_g": 16 },
+  "best_match": "Pennsylvania Avenue Dining Hall (PAR)",
+  "best_protein": "Ikenberry Dining Center (Ike)",
+  "halls": [{
+    "hall": "Pennsylvania Avenue Dining Hall (PAR)", "meal": "lunch", "match": 99,
+    "tray":         { "items": [{ "item_id": 1, "name": "...", "servings": 1.5, "kcal": 270, "protein_g": 30, "carbs_g": 2, "fat_g": 12 }],
+                      "total": { "kcal": 585, "protein_g": 45, "carbs_g": 65, "fat_g": 18 }, "note": null },
+    "high_protein": { "items": [], "total": { "kcal": 580, "protein_g": 60, "carbs_g": 52, "fat_g": 16 }, "protein_share": 41, "note": null }
+  }]
+}
+```
+`meal` in each hall is the menu that was compared (when a hall has both `light lunch` and `lunch`, the plain `lunch`). Differences of a point or two between big dining halls are not meaningful; the useful signal is a hall scoring clearly lower (e.g. Everybody Eats has few protein dishes).
+
 ### `GET /recommendations/meals?user_id=&hall=&date=&meal=&avoid=` ✅ (D's `recommend()` in `app/recommend.py`)
 Recommended dishes for one meal. Without `avoid` the answer is always the same. For a "show me another" button, send `avoid` = the `item_id`s of the tray on screen, comma-separated (e.g. `&avoid=1234,1250,1311`): those dishes are steered away from and a different, similarly good tray comes back. If `recommend()` is missing, errors, or returns something malformed, a simple placeholder in the same shape is returned (with an explanatory `note`), so the page never breaks.
 ```json
