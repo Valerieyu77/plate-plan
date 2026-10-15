@@ -309,20 +309,20 @@ def test_a_valid_recommendation_is_passed_through_unchanged(client, monkeypatch)
     assert client.get("/recommendations/meals", params=params).json() == good
 
 
-def test_seed_is_only_passed_to_a_recommend_that_accepts_it(client, monkeypatch):
+def test_avoid_ids_are_passed_to_a_recommend_that_accepts_them(client, monkeypatch):
     import app.main as main
     seen = {}
 
-    def with_seed(target, items, max_servings=3.0, seed=None):
-        seen["seed"] = seed
-        return {"items": [], "total": {"kcal": 0, "protein_g": 0, "carbs_g": 0, "fat_g": 0}, "target": target, "note": None}
+    def with_avoid(target, items, max_servings=3.0, avoid_ids=()):
+        seen["avoid"] = list(avoid_ids)
+        return good_empty(target)
 
-    monkeypatch.setattr(main, "recommend", with_seed)
+    monkeypatch.setattr(main, "recommend", with_avoid)
     uid, params = _ready_user(client)
-    client.get("/recommendations/meals", params={**params, "seed": 7})
-    assert seen["seed"] == 7
+    client.get("/recommendations/meals", params={**params, "avoid": "3, 7,x,9"})
+    assert seen["avoid"] == [3, 7, 9]  # junk entries are ignored
     monkeypatch.setattr(main, "recommend", lambda target, items, max_servings=3.0: good_empty(target))
-    assert client.get("/recommendations/meals", params={**params, "seed": 7}).status_code == 200  # no TypeError
+    assert client.get("/recommendations/meals", params={**params, "avoid": "3"}).status_code == 200  # no TypeError
 
 
 def good_empty(target):

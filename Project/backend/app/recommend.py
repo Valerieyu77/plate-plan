@@ -12,6 +12,8 @@ How to check your work:
 """
 
 import heapq
+import math
+import re
 
 NUTRIENTS = ["kcal", "protein_g", "carbs_g", "fat_g"]
 LABELS = {"kcal": "calories", "protein_g": "protein", "carbs_g": "carbs", "fat_g": "fat"}
@@ -29,6 +31,29 @@ WEIGHTS = {"kcal": 2.0, "protein_g": 1.5, "carbs_g": 1.0, "fat_g": 1.0}
 FLOORS = {"kcal": 50.0, "protein_g": 5.0, "carbs_g": 5.0, "fat_g": 5.0}
 DISH_COST = 0.005  # added per dish, so a dish must earn its place: 3 dishes beat 5 when equally close
 AVOID_COST = 0.05  # added for a dish in avoid_ids, so it is only used when it is clearly the better choice
+
+# Rules that make a plate look like a meal. Matching the numbers alone would happily use sauces and
+# herbs (low calories, easy to fine-tune with) or half a tortilla to close a small gap.
+MIN_LINE_KCAL = 80      # a dish on the plate must add at least this much
+MIN_DISHES = 2          # a normal-size meal is more than one dish
+NORMAL_MEAL_KCAL = 350  # ...where "normal size" means a target of at least this many kcal
+DESSERT_STEPS = 2       # at most one dessert, and at most one serving of it (2 half steps)
+_NOT_A_MEAL = re.compile(
+    r"\b(sauce|dressing|syrup|ketchup|mayonnaise|mustard|gravy|jelly|creamer|seasoning|topping|relish)\b", re.I
+)
+_NOT_A_MEAL_CATEGORY = ("sauce", "dressing", "condiment", "beverage", "topping")
+
+
+def _is_meal_dish(item: dict) -> bool:
+    """False for sauces, dressings, condiments, toppings and drinks: they are not a meal."""
+    if _NOT_A_MEAL.search(item.get("name") or ""):
+        return False
+    category = (item.get("category") or "").lower()
+    return not any(word in category for word in _NOT_A_MEAL_CATEGORY)
+
+
+def _is_dessert(item: dict) -> bool:
+    return "dessert" in (item.get("category") or "").lower()
 
 
 def recommend(target: dict, items: list[dict], max_servings: float = 3.0, avoid_ids=()) -> dict:
@@ -58,19 +83,42 @@ def recommend(target: dict, items: list[dict], max_servings: float = 3.0, avoid_
           "note":   None,   # or a short sentence when there is no exact match, e.g. "Closest option: 5% under on protein."
         }
 
+    Rules on top of the numbers (see MIN_LINE_KCAL and friends): no sauces, dressings, condiments,
+    toppings or drinks; every dish adds at least MIN_LINE_KCAL; at most one dessert, one serving of
+    it; a normal-size meal has at least MIN_DISHES dishes.
+
     How it works (a beam search): start with the empty plate. Add one dish to it in every way that
     helps, keep the BEAM best plates, add one more dish to each of those, and so on up to
     MAX_DISHES. The answer is the best plate seen along the way. The same inputs always give the
     same plate.
     """
-    menu = [i for i in items if (i.get("kcal") or 0) >= MIN_KCAL] or [i for i in items if (i.get("kcal") or 0) > 0]
+    max_steps = int(max_servings / STEP)
+
+    def cap_of(item):  # most half servings of this dish
+        return DESSERT_STEPS if _is_dessert(item) else max_steps
+
+    def worth_it(item):  # a real dish, and one that can reach MIN_LINE_KCAL within its serving limit
+        kcal = item.get("kcal") or 0
+        return kcal >= MIN_KCAL and _is_meal_dish(item) and kcal * STEP * cap_of(item) >= MIN_LINE_KCAL
+
+    menu, seen = [], set()
+    for item in items:
+        name = (item.get("name") or "").strip().lower()
+        if worth_it(item) and name not in seen:  # the same dish listed at two stations counts once
+            seen.add(name)
+            menu.append(item)
+    # If the rules leave nothing (a menu of only sauces and sides), fall back to anything with calories
+    menu = menu or [i for i in items if (i.get("kcal") or 0) >= MIN_KCAL] or [i for i in items if (i.get("kcal") or 0) > 0]
     if not menu:
         return _result([], target, "No dishes on this menu fit your restrictions.")
     if all(target[k] <= 0 for k in NUTRIENTS):
         return _result([], target, "You have already reached your target for this meal.")
 
     avoid = set(avoid_ids)
-    max_steps = int(max_servings / STEP)
+    cap = [cap_of(i) for i in menu]
+    dessert = [_is_dessert(i) for i in menu]
+    # Smallest number of half servings that makes a dish worth putting on the plate
+    min_n = [min(cap[k], max(1, math.ceil(MIN_LINE_KCAL / ((i.get("kcal") or 1) * STEP)))) for k, i in enumerate(menu)]
     # Rescale every nutrient so that cost = (distance from goal) squared: then the best amount of a
     # dish can be worked out directly instead of trying each amount.
     scale = [WEIGHTS[k] ** 0.5 / max(target[k], FLOORS[k]) for k in NUTRIENTS]
@@ -90,7 +138,9 @@ def recommend(target: dict, items: list[dict], max_servings: float = 3.0, avoid_
         """Best number of half servings of dish i to fill `gap`, and how much that lowers the cost.
         (0, 0) when the dish does not help enough to be worth adding."""
         along = sum(g * x for g, x in zip(gap, half[i]))
-        n = max(0, min(max_steps, round(along / length[i])))
+        n = max(0, min(cap[i], round(along / length[i])))
+        if n and n < min_n[i]:
+            n = min_n[i]  # either a meaningful amount of the dish, or none of it
         saved = 2 * n * along - n * n * length[i] - extra[i]
         return (n, saved) if n and saved > 0 else (0, 0)
 
@@ -106,13 +156,15 @@ def recommend(target: dict, items: list[dict], max_servings: float = 3.0, avoid_
                 break
         return plate
 
-    best, beam = {}, [{}]
+    need = MIN_DISHES if target["kcal"] >= NORMAL_MEAL_KCAL and len(menu) >= MIN_DISHES else 1
+    best, best_enough, beam = {}, None, [{}]
     for _ in range(MAX_DISHES):
         grown = []
         for plate in beam:
             gap, base = gap_of(plate), cost(plate)
+            has_dessert = any(dessert[j] for j in plate)
             for i in range(len(menu)):
-                if i not in plate:
+                if i not in plate and not (dessert[i] and has_dessert):
                     n, saved = fit(gap, i)
                     if n:
                         grown.append((base - saved, plate, i, n))
@@ -121,6 +173,10 @@ def recommend(target: dict, items: list[dict], max_servings: float = 3.0, avoid_
         if not beam:
             break
         best = min([best, *beam], key=cost)
+        for plate in beam:  # the best plate that has enough dishes to be a meal
+            if len(plate) >= need and (best_enough is None or cost(plate) < cost(best_enough)):
+                best_enough = plate
+    best = best_enough if best_enough is not None else best
 
     lines = [
         {"item_id": menu[i].get("id"), "name": menu[i].get("name"), "servings": n * STEP,
