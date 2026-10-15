@@ -18,9 +18,9 @@ export const ACTIVITY_LEVELS = [
 ]
 
 export const GOALS = {
-  lose: { label: 'Lose weight', note: '−450 kcal a day below maintenance' },
-  maintain: { label: 'Maintain', note: 'Eat what your body uses' },
-  gain: { label: 'Gain muscle', note: '+400 kcal a day above maintenance' },
+  lose: { label: 'Lose weight', note: '450 kcal a day below what you burn: about 0.9 lb a week. No end date.' },
+  maintain: { label: 'Maintain', note: 'Eat what your body uses.' },
+  gain: { label: 'Gain muscle', note: '400 kcal a day above what you burn: about 0.8 lb a week. No end date.' },
 }
 
 // YYYY-MM-DD in the user's local time zone (toISOString alone would use UTC)
@@ -28,3 +28,7 @@ export function todayISO() {
   const d = new Date()
   return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10)
 }
+
+// The three meals people think in. The data keeps the dining site's own names (light lunch, kosher lunch...),
+// which the backend groups under these (see GET /meal-options).
+export const MEAL_GROUPS = ['breakfast', 'lunch', 'dinner']
