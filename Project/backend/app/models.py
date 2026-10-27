@@ -38,14 +38,38 @@ class UserBase(SQLModel):
 
 class User(UserBase, table=True):
     id: int | None = Field(default=None, primary_key=True)
+    # bcrypt hash, never the password itself; None for accounts made before login existed
+    password_hash: str | None = None
 
 
 class UserCreate(UserBase):
     pass
 
 
+class UserSignUp(UserCreate):
+    password: str = Field(min_length=8)
+
+    @field_validator("password")
+    @classmethod
+    def _check_password_length(cls, v):
+        # bcrypt only reads the first 72 bytes
+        if len(v.encode()) > 72:
+            raise ValueError("password must be at most 72 bytes")
+        return v
+
+
 class UserPublic(UserBase):
     id: int
+
+
+class LogIn(SQLModel):
+    email: str
+    password: str
+
+
+class AuthResponse(SQLModel):
+    token: str
+    user: UserPublic
 
 
 # ---------- Goal (one per user) ----------

@@ -1,12 +1,13 @@
 import { useState } from 'react'
-import { createUser, getUser } from '../api'
+import { logIn, signUp } from '../api'
 import { Button, Card, ErrorNote, Field, Input, Segmented, Select, TagInput } from '../components/ui'
 import { ACTIVITY_LEVELS, ALLERGIES, DIETARY_RESTRICTIONS, todayISO } from '../constants'
-import { findAccountByEmail, forgetAccount, getAccounts, rememberAccount, setPrefs } from '../session'
+import { getLastEmail, setPrefs } from '../session'
 
 const EMPTY_FORM = {
   name: '',
   email: '',
+  password: '',
   weight: '',
   heightFt: '',
   heightIn: '',
@@ -19,8 +20,8 @@ const EMPTY_FORM = {
 }
 
 export default function AuthPage({ onSignedIn }) {
-  const [tab, setTab] = useState(getAccounts().length ? 'login' : 'signup')
-  const [prefillEmail, setPrefillEmail] = useState('')
+  const [tab, setTab] = useState(getLastEmail() ? 'login' : 'signup')
+  const [prefillEmail, setPrefillEmail] = useState(getLastEmail)
 
   const goToLogin = (email) => {
     setPrefillEmail(email)
@@ -80,12 +81,14 @@ function SignUpForm({ onSignedIn, onExistingEmail }) {
     const heightIn = Number(form.heightFt) * 12 + Number(form.heightIn || 0)
     if (!form.sex) return setError({ message: 'Please choose your sex; the calorie calculation needs it.' })
     if (heightIn < 36 || heightIn > 96) return setError({ message: 'Please check your height.' })
+    if (form.password.length < 8) return setError({ message: 'Please use a password of at least 8 characters.' })
 
     setBusy(true)
     try {
-      const user = await createUser({
+      const auth = await signUp({
         name: form.name.trim(),
         email: form.email.trim().toLowerCase(),
+        password: form.password,
         weight_lbs: Number(form.weight),
         height_in: heightIn,
         gender: form.sex, // "male" or "female", lowercase
@@ -94,9 +97,8 @@ function SignUpForm({ onSignedIn, onExistingEmail }) {
         allergies: form.allergies,
         dietary_restrictions: form.diet,
       })
-      rememberAccount(user)
-      if (form.targetWeight) setPrefs(user.id, { targetWeight: Number(form.targetWeight) })
-      onSignedIn(user, { isNew: true })
+      if (form.targetWeight) setPrefs(auth.user.id, { targetWeight: Number(form.targetWeight) })
+      onSignedIn(auth, { isNew: true })
     } catch (err) {
       setError({ message: err.status === 409 ? 'An account with this email already exists.' : err.message, duplicate: err.status === 409 })
       setBusy(false)
@@ -116,6 +118,9 @@ function SignUpForm({ onSignedIn, onExistingEmail }) {
         </Field>
         <Field label="Email" className="col-span-2">
           <Input required type="email" value={form.email} onChange={set('email')} autoComplete="email" />
+        </Field>
+        <Field label="Password" hint="At least 8 characters." className="col-span-2">
+          <Input required type="password" minLength={8} maxLength={72} value={form.password} onChange={set('password')} autoComplete="new-password" />
         </Field>
 
         <Field label="Weight (lb)">
@@ -215,76 +220,34 @@ function SignUpForm({ onSignedIn, onExistingEmail }) {
 
 function LogInForm({ initialEmail, onSignedIn }) {
   const [email, setEmail] = useState(initialEmail)
+  const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
-  const [accounts, setAccounts] = useState(getAccounts)
 
-  const logIn = async (account) => {
+  const submit = async (e) => {
+    e.preventDefault()
     setError('')
     setBusy(true)
     try {
-      const user = await getUser(account.id)
-      // A reset database can reuse ids, so make sure the id still belongs to this email
-      if (user.email.toLowerCase() !== account.email.toLowerCase()) throw Object.assign(new Error(), { status: 404 })
-      rememberAccount(user)
-      onSignedIn(user, { isNew: false })
+      onSignedIn(await logIn(email.trim().toLowerCase(), password), { isNew: false })
     } catch (err) {
-      if (err.status === 404) {
-        forgetAccount(account.id)
-        setAccounts(getAccounts())
-        setError('That account no longer exists on the server. Please sign up again.')
-      } else {
-        setError(err.message)
-      }
+      setError(err.status === 401 ? 'Incorrect email or password.' : err.message)
       setBusy(false)
     }
-  }
-
-  const submit = (e) => {
-    e.preventDefault()
-    const account = findAccountByEmail(email)
-    if (!account) {
-      setError(
-        "No account with that email has signed up in this browser. Logging in from another browser isn't available yet, so sign up here instead.",
-      )
-      return
-    }
-    logIn(account)
   }
 
   return (
     <form onSubmit={submit} className="space-y-6">
       <div>
         <h2 className="text-xl font-bold">Welcome back</h2>
-        <p className="mt-1 text-sm text-muted">Accounts are remembered in this browser until full login is added.</p>
+        <p className="mt-1 text-sm text-muted">Log in on any device with your email and password.</p>
       </div>
-
-      {accounts.length > 0 && (
-        <ul className="divide-y divide-line overflow-hidden rounded-xl ring-1 ring-line">
-          {accounts.map((a) => (
-            <li key={a.id}>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => logIn(a)}
-                className="flex w-full items-center gap-3 px-3.5 py-3 text-left transition-colors hover:bg-bg disabled:opacity-60"
-              >
-                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-ink text-sm font-semibold text-white">
-                  {a.name.trim().charAt(0).toUpperCase()}
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate font-medium">{a.name}</span>
-                  <span className="block truncate text-[13px] text-muted">{a.email}</span>
-                </span>
-                <span className="text-sm font-semibold text-brand">Continue</span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
 
       <Field label="Email">
         <Input required type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" />
+      </Field>
+      <Field label="Password">
+        <Input required type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
       </Field>
 
       <ErrorNote>{error}</ErrorNote>
