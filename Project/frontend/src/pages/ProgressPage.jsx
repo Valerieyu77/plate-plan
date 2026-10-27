@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
-import { addWeightLog, getProgress } from '../api'
+import { addWeightLog, getGoalTimeline, getProgress } from '../api'
 import { Bar, Button, Card, DateChip, ErrorNote, Field, Input, Label, Loading, PageHeader, ProgressRing } from '../components/ui'
 import { todayISO } from '../constants'
-import { getPrefs } from '../session'
+import { fmtDate } from '../format'
 
 const MACROS = [
   ['protein_g', 'Protein', 'bg-ink'],
@@ -10,9 +10,20 @@ const MACROS = [
   ['fat_g', 'Fat', 'bg-muted'],
 ]
 
+const STATUS = {
+  on_track: ['On track', 'bg-good/10 text-good'],
+  ahead: ['Ahead of plan', 'bg-good/10 text-good'],
+  behind: ['Behind plan', 'bg-brand-soft text-brand-deep'],
+  reached: ['Goal reached', 'bg-good/10 text-good'],
+}
+
 async function loadProgress(userId, date) {
   try {
-    return await getProgress(userId, date)
+    const [progress, timeline] = await Promise.all([
+      getProgress(userId, date),
+      getGoalTimeline(userId).catch((err) => (err.status === 404 ? null : Promise.reject(err))),
+    ])
+    return { ...progress, timeline }
   } catch (err) {
     if (err.status === 404) return { missingGoal: true }
     throw err
@@ -25,7 +36,6 @@ export default function ProgressPage({ user, onSetGoal }) {
   const [weighIn, setWeighIn] = useState({ date: todayISO(), weight: '' })
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState('')
-  const targetWeight = getPrefs(user.id).targetWeight
 
   useEffect(() => {
     let ignore = false
@@ -102,7 +112,8 @@ export default function ProgressPage({ user, onSetGoal }) {
                 </p>
               )}
             </div>
-            <WeightChart points={progress.weight_trend} target={targetWeight} />
+            {progress.timeline && <TimelineSummary timeline={progress.timeline} />}
+            <WeightChart points={progress.weight_trend} planned={progress.timeline?.planned} target={progress.timeline?.target_weight_lbs} />
 
             <form onSubmit={saveWeight} className="mt-4 grid grid-cols-2 gap-3">
               <Field label="Date">
@@ -148,22 +159,49 @@ export default function ProgressPage({ user, onSetGoal }) {
   )
 }
 
-// Simple SVG line chart: one series (weight) plus a dashed line for the target weight
-function WeightChart({ points, target }) {
+function TimelineSummary({ timeline: t }) {
+  const [label, tone] = STATUS[t.status]
+  return (
+    <div className="mt-3 rounded-xl bg-bg p-3.5 text-sm">
+      <div className="flex items-center justify-between gap-3">
+        <span className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ${tone}`}>{label}</span>
+        <span className="text-muted">
+          {t.target_weight_lbs} lb by {fmtDate(t.target_date)}
+        </span>
+      </div>
+      {t.status !== 'reached' && (
+        <p className="mt-2 text-muted">
+          By your last weigh-in the plan expected <span className="font-semibold text-ink">{t.expected_weight_lbs} lb</span>.{' '}
+          {Math.abs(t.remaining_lbs)} lb to go.
+          {t.projected_finish_date && t.projected_finish_date > t.target_date && (
+            <> At a safe pace you'll get there around {fmtDate(t.projected_finish_date)}.</>
+          )}
+        </p>
+      )}
+    </div>
+  )
+}
+
+// Simple SVG line chart: logged weight, the planned path (dashed, when the goal has a timeline)
+// and a dashed line for the target weight
+function WeightChart({ points, planned = [], target }) {
   const [hover, setHover] = useState(null)
-  if (points.length === 0) {
+  if (points.length === 0 && planned.length === 0) {
     return <p className="mt-3 rounded-xl bg-bg py-8 text-center text-sm text-muted">No weigh-ins yet. Log one below to start your trend.</p>
   }
 
   const W = 520
   const H = 220
   const pad = { top: 16, right: 16, bottom: 28, left: 40 }
-  const values = points.map((p) => p.weight_lbs).concat(target ? [target] : [])
+  const values = points.concat(planned).map((p) => p.weight_lbs).concat(target ? [target] : [])
   const lo = Math.floor(Math.min(...values) - 2)
   const hi = Math.ceil(Math.max(...values) + 2)
   const times = points.map((p) => new Date(p.date).getTime())
-  const t0 = Math.min(...times)
-  const t1 = Math.max(...times)
+  const allTimes = times.concat(planned.map((p) => new Date(p.date).getTime()))
+  const t0 = Math.min(...allTimes)
+  const t1 = Math.max(...allTimes)
+  const first = points.concat(planned).reduce((a, b) => (a.date <= b.date ? a : b))
+  const last = points.concat(planned).reduce((a, b) => (a.date >= b.date ? a : b))
   const x = (t) => (t1 === t0 ? (pad.left + W - pad.right) / 2 : pad.left + ((t - t0) / (t1 - t0)) * (W - pad.left - pad.right))
   const y = (v) => pad.top + ((hi - v) / (hi - lo)) * (H - pad.top - pad.bottom)
   const coords = points.map((p, i) => ({ ...p, cx: x(times[i]), cy: y(p.weight_lbs) }))
@@ -171,6 +209,7 @@ function WeightChart({ points, target }) {
   const active = hover !== null ? coords[hover] : null
 
   const onMove = (e) => {
+    if (coords.length === 0) return
     const rect = e.currentTarget.getBoundingClientRect()
     const mx = ((e.clientX - rect.left) / rect.width) * W
     let best = 0
@@ -186,7 +225,7 @@ function WeightChart({ points, target }) {
         viewBox={`0 0 ${W} ${H}`}
         className="w-full"
         role="img"
-        aria-label={`Weight trend, ${points.length} weigh-ins, latest ${points.at(-1).weight_lbs} lb`}
+        aria-label={points.length ? `Weight trend, ${points.length} weigh-ins, latest ${points.at(-1).weight_lbs} lb` : 'Planned weight'}
         onPointerMove={onMove}
         onPointerLeave={() => setHover(null)}
       >
@@ -199,12 +238,22 @@ function WeightChart({ points, target }) {
           </g>
         ))}
         <text x={pad.left} y={H - 6} className="fill-muted text-[11px]">
-          {points[0].date}
+          {first.date}
         </text>
-        {points.length > 1 && (
+        {last.date !== first.date && (
           <text x={W - pad.right} y={H - 6} textAnchor="end" className="fill-muted text-[11px]">
-            {points.at(-1).date}
+            {last.date}
           </text>
+        )}
+
+        {planned.length > 1 && (
+          <polyline
+            points={planned.map((p) => `${x(new Date(p.date).getTime())},${y(p.weight_lbs)}`).join(' ')}
+            fill="none"
+            stroke="var(--color-muted)"
+            strokeWidth="1.5"
+            strokeDasharray="3 4"
+          />
         )}
 
         {target && (

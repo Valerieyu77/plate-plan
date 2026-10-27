@@ -115,8 +115,14 @@ export const getMe = () => request('/auth/me')
 
 export const getUser = (userId) => request(`/users/${userId}`)
 
-export const setGoal = (userId, goalType) => request(`/users/${userId}/goal`, { method: 'PUT', body: { goal_type: goalType } })
+// `goal` is {goal_type} for a steady pace, or {target_weight_lbs, target_date} for a timeline
+export const setGoal = (userId, goal) => request(`/users/${userId}/goal`, { method: 'PUT', body: goal })
 export const getGoal = (userId) => request(`/users/${userId}/goal`)
+// Checks a timeline without saving: calories, pace, tier (healthy / aggressive / unsafe), issues, safe alternatives
+export const previewGoal = (userId, targetWeight, targetDate) =>
+  request(`/users/${userId}/goal/preview`, { method: 'POST', body: { target_weight_lbs: targetWeight, target_date: targetDate } })
+// Planned vs actual weight; 404 when the goal has no timeline
+export const getGoalTimeline = (userId) => request(`/users/${userId}/goal/timeline`)
 
 // ---------- Menus ----------
 

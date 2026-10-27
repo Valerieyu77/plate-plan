@@ -22,13 +22,13 @@ Status: ✅ built and merged, 🟡 build with mock data first, ⬜ not started.
 | Step in the app | Endpoint |
 |---|---|
 | Sign up with body info / log in | `POST /auth/signup` ✅, `POST /auth/login` ✅, `GET /auth/me` ✅ |
-| Set a goal, get daily targets | `PUT /users/{id}/goal` ✅ |
+| Set a goal (steady pace or target weight + date), get daily targets | `POST /users/{id}/goal/preview` ✅, `PUT /users/{id}/goal` ✅ |
 | Pick a meal first, then a hall that serves it | `GET /halls?meal=` ✅, `GET /meal-options` ✅ |
 | See this meal's target and the dishes the user can eat | `GET /users/{id}/meal-target` ✅, `GET /menu-items?user_id=` ✅ |
 | Get recommended dishes for that meal | `GET /recommendations/meals` 🟡 (D) |
 | Check off / un-check what was eaten | `POST` ✅ and `DELETE /users/{id}/food-logs` ✅ |
 | Log weight | `POST /users/{id}/weight-logs` ✅ |
-| Progress page: target vs actual, weight trend | `GET /users/{id}/progress` ✅ |
+| Progress page: target vs actual, weight trend, plan vs actual weight | `GET /users/{id}/progress` ✅, `GET /users/{id}/goal/timeline` ✅ |
 
 Everything marked ✅ is in PR #9 (or already merged) and has tests.
 
@@ -58,23 +58,70 @@ The user the token belongs to. The frontend calls it on page load to restore the
 ### `GET /users/{id}` ✅
 Returns the same shape as above plus `id`.
 
-### `PUT /users/{id}/goal` ✅ (PR #9)
-Pick a goal type; the daily targets are calculated and saved. The prototype follows the frontend design: lose / maintain / gain, no target weight or timeline.
+### `PUT /users/{id}/goal` ✅
+Set the goal; the daily targets are calculated and saved. Send **either** a goal type (steady pace, no end date) **or** a timeline:
 ```json
-// request
+// steady pace: lose (-450 kcal), maintain (0) or gain (+400 kcal)
 { "goal_type": "lose" }
+// timeline: the pace sets the calories; goal_type follows from the target
+{ "target_weight_lbs": 130, "target_date": "2026-12-20" }
 // response
 {
-  "user_id": 1, "target_weight_lbs": null,
-  "calorie_goal": 1450, "protein_goal_g": 127, "carb_goal_g": 160, "fat_goal_g": 40, "sugar_limit_g": null,
-  "warning": null
+  "user_id": 1, "goal_type": "lose", "target_weight_lbs": 130, "target_date": "2026-12-20",
+  "start_date": "2026-10-27", "start_weight_lbs": 140, "weekly_rate_lbs": 1.3,
+  "calorie_goal": 1500, "protein_goal_g": 127, "carb_goal_g": 160, "fat_goal_g": 42, "sugar_limit_g": null,
+  "tier": "aggressive", "warning": "1.3 lb a week is on the fast side. ..."
 }
 ```
-`goal_type` is `lose` (-450 kcal), `maintain` (0) or `gain` (+400 kcal). `422` if the profile lacks weight, height, gender or birthdate (the message lists what is missing). `warning` is set if the calories were raised to the safe minimum.
-A timeline (target weight + weeks) can be added later as an extra input without changing the table.
+- `422` if the profile lacks weight, height, gender or birthdate (the message lists what is missing), for a date in the past or more than 2 years away, and for an **unsafe** timeline (the message says why; use the preview below to offer alternatives). Nothing is saved then.
+- `tier` (timeline only): `healthy` or `aggressive`. `warning` is set if the calories were raised to the safe minimum or the pace is aggressive.
+- A steady-pace goal clears any timeline.
+- Each weigh-in (`POST /users/{id}/weight-logs`) recalculates a timeline goal's calories from what is left and the days left, never faster than the safe maximum. Once the target is reached or the date passes, the targets switch to maintaining.
 
-### `GET /users/{id}/goal` ✅ (PR #9)
-Returns the stored goal (same fields as the response above). `404` if none.
+Safety rules (`app/timeline.py`, about 3,500 kcal per lb):
+
+| | Healthy | Aggressive (saved, with a warning) | Unsafe (refused) |
+|---|---|---|---|
+| Loss | ≤ 1 lb/week | ≤ 2 lb/week and ≤ 1% of body weight/week | faster, or under the calorie minimum (1200 F / 1500 M) |
+| Gain | ≤ 0.5 lb/week | ≤ 1 lb/week | faster |
+| Also unsafe | | | under 7 days to the date; a target BMI under 18.5 |
+
+### `POST /users/{id}/goal/preview` ✅
+Same timeline body as above; checks it without saving. Always `200` for a valid request:
+```json
+{
+  "goal_type": "lose", "start_weight_lbs": 140, "target_weight_lbs": 120, "target_date": "2026-10-29", "days": 2,
+  "weekly_rate_lbs": 70.0, "daily_calorie_change": -35000,
+  "calorie_goal": 1200, "protein_goal_g": 127, "carb_goal_g": 71, "fat_goal_g": 33, "warning": "...",
+  "tier": "unsafe",
+  "issues": ["Give yourself at least 7 days; ..."],
+  "alternatives": {
+    "target_weight_lbs": 120,               // moved up to a healthy weight if the target was underweight
+    "earliest_date": "2027-02-04",          // same target at the fastest safe pace
+    "recommended_date": "2027-03-16",       // same target at a healthy pace
+    "target_weight_by_date": null           // most that can safely change by the chosen date (null under 7 days)
+  }
+}
+```
+`alternatives` is `null` for maintaining. `issues` is empty unless `tier` is `unsafe`.
+
+### `GET /users/{id}/goal` ✅
+Returns the stored goal (same fields as the `PUT` response, without `tier`/`warning`). `404` if none.
+
+### `GET /users/{id}/goal/timeline` ✅
+Planned vs actual weight for the progress chart. `404` if the goal has no timeline.
+```json
+{
+  "goal_type": "lose", "start_date": "2026-10-27", "start_weight_lbs": 140,
+  "target_date": "2026-12-22", "target_weight_lbs": 132, "weekly_rate_lbs": 1.0,
+  "planned": [ { "date": "2026-10-27", "weight_lbs": 140 }, { "date": "2026-11-03", "weight_lbs": 139 }, "...", { "date": "2026-12-22", "weight_lbs": 132 } ],
+  "actual":  [ { "date": "2026-11-03", "weight_lbs": 139.2 } ],
+  "latest_weight_lbs": 139.2, "expected_weight_lbs": 139, "remaining_lbs": -7.2,
+  "status": "on_track",
+  "projected_finish_date": "2026-12-23"
+}
+```
+`planned` has one point a week plus the target date. `status`: `on_track` (within 1 lb of the plan), `ahead`, `behind` or `reached`. `projected_finish_date` is when the target is reached at the current pace (`null` once reached).
 
 ### `GET /meals?hall=&date=&main_only=` ✅
 Meals a hall serves on a date, for the dropdown. Returns a list of strings in time-of-day order.
@@ -198,7 +245,7 @@ Target vs actual for a day, plus the weight history for the trend chart. `404` i
 
 ## Who builds what
 - **C:** every endpoint above, deployment (Render, `DATABASE_URL` env var).
-- **B:** owns `app/nutrition.py` (a working baseline is in PR #9): daily targets, per-meal split, cross-meal adjustment, progress. Still open for B: stricter safety limits, an optional timeline, tuning the meal weights.
+- **B:** owns `app/nutrition.py` (a working baseline is in PR #9): daily targets, per-meal split, cross-meal adjustment, progress. Timelines and their safety limits are in `app/timeline.py`. Still open for B: tuning the meal weights.
 - **D:** `recommend(target, items) -> {items, total, note}` as a plain function; C calls it.
 - **A:** menu data (`menuitem` table, kept fresh), `GET /halls`, `GET /menu-items`, end-to-end tests.
 - **Frontend:** build against this document with mock data, switch the base URL when the backend is ready.

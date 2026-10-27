@@ -16,6 +16,7 @@ from .models import (
 )
 from .dietary import allowed_for_user
 from .recommend import recommend
+from .timeline import plan_goal, replan, timeline
 from .picks import high_protein_target, match_score, protein_share
 from .nutrition import (
     GROUP_ORDER, MEAL_GROUP, MEAL_ORDER, NUTRIENTS, add_nutrients, daily_targets, day_progress, goal_to_targets,
@@ -133,25 +134,68 @@ def list_food_logs(user_id: int, date: date, session: SessionDep):
     return session.exec(select(FoodLog).where(FoodLog.user_id == user_id, FoodLog.date == date)).all()
 
 
-@app.put("/users/{user_id}/goal", response_model=GoalPublic, dependencies=[OwnerOnly])
-def set_goal(user_id: int, goal: GoalCreate, session: SessionDep):
-    """Pick lose / maintain / gain; the daily calorie and macro targets are calculated and saved."""
-    user = session.get(User, user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+def _plan_or_422(user: User, goal: GoalCreate) -> dict:
     try:
-        targets = daily_targets(user, goal.goal_type)
+        return plan_goal(user, goal.target_weight_lbs, goal.target_date)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
-    warning = targets.pop("warning")
+
+@app.post("/users/{user_id}/goal/preview", dependencies=[OwnerOnly])
+def preview_goal(user_id: int, goal: GoalCreate, session: SessionDep):
+    """
+    Check a timeline goal without saving it: the daily calories it needs, the pace, its tier
+    ("healthy", "aggressive" or "unsafe"), why it is unsafe, and safe alternatives. See app/timeline.py.
+    """
+    if not goal.has_timeline:
+        raise HTTPException(status_code=422, detail="send target_weight_lbs and target_date to preview a timeline")
+    user = session.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return _plan_or_422(user, goal)
+
+
+@app.put("/users/{user_id}/goal", response_model=GoalPublic, dependencies=[OwnerOnly])
+def set_goal(user_id: int, goal: GoalCreate, session: SessionDep):
+    """
+    Set the goal; the daily calorie and macro targets are calculated and saved. Either a goal type
+    (lose / maintain / gain, fixed offset) or a target weight and date (timeline). An unsafe
+    timeline is refused with 422; POST .../goal/preview shows why and what would be safe.
+    """
+    user = session.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
     db_goal = session.get(Goal, user_id) or Goal(user_id=user_id)
-    for key, value in targets.items():
+    tier = None
+    if goal.has_timeline:
+        plan = _plan_or_422(user, goal)
+        if plan["tier"] == "unsafe":
+            raise HTTPException(status_code=422, detail=" ".join(plan["issues"]))
+        targets = {k: plan[k] for k in ("calorie_goal", "protein_goal_g", "carb_goal_g", "fat_goal_g", "warning")}
+        tier = plan["tier"]
+        timeline_fields = {
+            "goal_type": plan["goal_type"], "target_weight_lbs": goal.target_weight_lbs, "target_date": goal.target_date,
+            "start_date": date.today(), "start_weight_lbs": user.weight_lbs, "weekly_rate_lbs": plan["weekly_rate_lbs"],
+        }
+        if tier == "aggressive" and not targets["warning"]:
+            targets["warning"] = (f"{plan['weekly_rate_lbs']:.1f} lb a week is on the fast side. It is allowed, "
+                                  "but a slower pace is easier to keep up.")
+    else:
+        try:
+            targets = daily_targets(user, goal.goal_type)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+        timeline_fields = {"goal_type": goal.goal_type, "target_weight_lbs": None, "target_date": None,
+                           "start_date": None, "start_weight_lbs": None, "weekly_rate_lbs": None}
+
+    warning = targets.pop("warning")
+    for key, value in {**targets, **timeline_fields}.items():
         setattr(db_goal, key, value)
     session.add(db_goal)
     session.commit()
     session.refresh(db_goal)
-    return GoalPublic(**db_goal.model_dump(), warning=warning)
+    return GoalPublic(**db_goal.model_dump(), tier=tier, warning=warning)
 
 
 @app.get("/users/{user_id}/goal", response_model=GoalPublic, dependencies=[OwnerOnly])
@@ -160,6 +204,17 @@ def read_goal(user_id: int, session: SessionDep):
     if not goal:
         raise HTTPException(status_code=404, detail="No goal set for this user")
     return goal
+
+
+@app.get("/users/{user_id}/goal/timeline", dependencies=[OwnerOnly])
+def read_goal_timeline(user_id: int, session: SessionDep):
+    """Planned weight week by week next to the logged weigh-ins, whether the user is on track, and
+    when they should reach the target at the current pace. 404 without a timeline goal."""
+    goal = session.get(Goal, user_id)
+    if not goal or not goal.target_date:
+        raise HTTPException(status_code=404, detail="No timeline goal set for this user")
+    weights = session.exec(select(WeightLog).where(WeightLog.user_id == user_id).order_by(WeightLog.date, WeightLog.id)).all()
+    return timeline(goal, weights)
 
 
 # ---------- Menus ----------
@@ -261,6 +316,14 @@ def create_weight_log(user_id: int, entry: WeightLogCreate, session: SessionDep)
     if latest is None or day >= latest.date:
         user.weight_lbs = entry.weight_lbs
         session.add(user)
+        # A timeline goal's calories follow what is left to lose or gain in the time left
+        goal = session.get(Goal, user_id)
+        if goal and goal.target_date and goal.goal_type:
+            targets = replan(user, goal.goal_type, goal.target_weight_lbs, goal.target_date)
+            targets.pop("warning")
+            for key, value in targets.items():
+                setattr(goal, key, value)
+            session.add(goal)
     session.commit()
     session.refresh(log)
     return log
