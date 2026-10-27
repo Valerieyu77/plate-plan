@@ -6,12 +6,13 @@ from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from sqlmodel import Session, select
+from sqlmodel import Session, func, select
 
+from .auth import CurrentUserDep, OwnerOnly, create_token, hash_password, verify_password
 from .database import create_db_and_tables, get_session
 from .models import (
-    FoodLog, FoodLogCreate, FoodLogPublic, Goal, GoalCreate, GoalPublic, MenuItem, MenuItemPublic, User, UserCreate,
-    UserPublic, WeightLog, WeightLogCreate, WeightLogPublic,
+    AuthResponse, FoodLog, FoodLogCreate, FoodLogPublic, Goal, GoalCreate, GoalPublic, LogIn, MenuItem,
+    MenuItemPublic, User, UserPublic, UserSignUp, WeightLog, WeightLogCreate, WeightLogPublic,
 )
 from .dietary import allowed_for_user
 from .recommend import recommend
@@ -46,20 +47,44 @@ app.add_middleware(
 SessionDep = Annotated[Session, Depends(get_session)]
 
 
-@app.post("/users", response_model=UserPublic, status_code=201)
-def create_user(user: UserCreate, session: SessionDep):
-    existing = session.exec(select(User).where(User.email == user.email)).first()
-    if existing:
+# ---------- Accounts ----------
+
+def _user_by_email(session: Session, email: str) -> User | None:
+    return session.exec(select(User).where(func.lower(User.email) == email.strip().lower())).first()
+
+
+@app.post("/auth/signup", response_model=AuthResponse, status_code=201)
+def sign_up(body: UserSignUp, session: SessionDep):
+    """Create an account. Returns a login token and the user; 409 if the email is taken."""
+    if _user_by_email(session, body.email):
         raise HTTPException(status_code=409, detail="A user with this email already exists")
 
-    db_user = User.model_validate(user)
+    db_user = User.model_validate(
+        body.model_dump(exclude={"password"}) | {"email": body.email.strip().lower()},
+        update={"password_hash": hash_password(body.password)},
+    )
     session.add(db_user)
     session.commit()
     session.refresh(db_user)  # loads the auto-generated id
-    return db_user
+    return AuthResponse(token=create_token(db_user.id), user=db_user)
 
 
-@app.get("/users/{user_id}", response_model=UserPublic)
+@app.post("/auth/login", response_model=AuthResponse)
+def log_in(body: LogIn, session: SessionDep):
+    user = _user_by_email(session, body.email)
+    # Same message whether the email or the password is wrong, so emails can't be probed
+    if not user or not verify_password(body.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Incorrect email or password")
+    return AuthResponse(token=create_token(user.id), user=user)
+
+
+@app.get("/auth/me", response_model=UserPublic)
+def read_me(user: CurrentUserDep):
+    """The logged-in user, from the token; the frontend calls this to restore a session."""
+    return user
+
+
+@app.get("/users/{user_id}", response_model=UserPublic, dependencies=[OwnerOnly])
 def read_user(user_id: int, session: SessionDep):
     user = session.get(User, user_id)
     if not user:
@@ -80,7 +105,7 @@ def list_meals(hall: str, date: date, session: SessionDep, main_only: bool = Fal
     return sorted(meals, key=lambda m: (MEAL_ORDER.index(m) if m in MEAL_ORDER else len(MEAL_ORDER), m))
 
 
-@app.post("/users/{user_id}/food-logs", response_model=FoodLogPublic, status_code=201)
+@app.post("/users/{user_id}/food-logs", response_model=FoodLogPublic, status_code=201, dependencies=[OwnerOnly])
 def create_food_log(user_id: int, log: FoodLogCreate, session: SessionDep):
     if not session.get(User, user_id):
         raise HTTPException(status_code=404, detail="User not found")
@@ -101,14 +126,14 @@ def create_food_log(user_id: int, log: FoodLogCreate, session: SessionDep):
     return db_log
 
 
-@app.get("/users/{user_id}/food-logs", response_model=list[FoodLogPublic])
+@app.get("/users/{user_id}/food-logs", response_model=list[FoodLogPublic], dependencies=[OwnerOnly])
 def list_food_logs(user_id: int, date: date, session: SessionDep):
     if not session.get(User, user_id):
         raise HTTPException(status_code=404, detail="User not found")
     return session.exec(select(FoodLog).where(FoodLog.user_id == user_id, FoodLog.date == date)).all()
 
 
-@app.put("/users/{user_id}/goal", response_model=GoalPublic)
+@app.put("/users/{user_id}/goal", response_model=GoalPublic, dependencies=[OwnerOnly])
 def set_goal(user_id: int, goal: GoalCreate, session: SessionDep):
     """Pick lose / maintain / gain; the daily calorie and macro targets are calculated and saved."""
     user = session.get(User, user_id)
@@ -129,7 +154,7 @@ def set_goal(user_id: int, goal: GoalCreate, session: SessionDep):
     return GoalPublic(**db_goal.model_dump(), warning=warning)
 
 
-@app.get("/users/{user_id}/goal", response_model=GoalPublic)
+@app.get("/users/{user_id}/goal", response_model=GoalPublic, dependencies=[OwnerOnly])
 def read_goal(user_id: int, session: SessionDep):
     goal = session.get(Goal, user_id)
     if not goal:
@@ -186,7 +211,7 @@ def meal_options(hall: str, date: date, session: SessionDep):
     return options
 
 
-@app.get("/menu-items", response_model=list[MenuItemPublic])
+@app.get("/menu-items", response_model=list[MenuItemPublic], dependencies=[OwnerOnly])
 def list_menu_items(
     hall: str, date: date, session: SessionDep,
     meal: str | None = None, user_id: int | None = None, include_side_menus: bool = False,
@@ -211,7 +236,7 @@ def list_menu_items(
 
 # ---------- Food logs: undo ----------
 
-@app.delete("/users/{user_id}/food-logs/{log_id}", status_code=204)
+@app.delete("/users/{user_id}/food-logs/{log_id}", status_code=204, dependencies=[OwnerOnly])
 def delete_food_log(user_id: int, log_id: int, session: SessionDep):
     log = session.get(FoodLog, log_id)
     if not log or log.user_id != user_id:
@@ -222,7 +247,7 @@ def delete_food_log(user_id: int, log_id: int, session: SessionDep):
 
 # ---------- Weight logs ----------
 
-@app.post("/users/{user_id}/weight-logs", response_model=WeightLogPublic, status_code=201)
+@app.post("/users/{user_id}/weight-logs", response_model=WeightLogPublic, status_code=201, dependencies=[OwnerOnly])
 def create_weight_log(user_id: int, entry: WeightLogCreate, session: SessionDep):
     user = session.get(User, user_id)
     if not user:
@@ -241,7 +266,7 @@ def create_weight_log(user_id: int, entry: WeightLogCreate, session: SessionDep)
     return log
 
 
-@app.get("/users/{user_id}/weight-logs", response_model=list[WeightLogPublic])
+@app.get("/users/{user_id}/weight-logs", response_model=list[WeightLogPublic], dependencies=[OwnerOnly])
 def list_weight_logs(user_id: int, session: SessionDep):
     if not session.get(User, user_id):
         raise HTTPException(status_code=404, detail="User not found")
@@ -273,7 +298,7 @@ def _daily_targets_or_404(session: Session, user_id: int) -> dict:
     return goal_to_targets(goal)
 
 
-@app.get("/users/{user_id}/meal-target")
+@app.get("/users/{user_id}/meal-target", dependencies=[OwnerOnly])
 def read_meal_target(user_id: int, date: date, meal: str, session: SessionDep):
     """
     What is left to eat at this meal: the day's target minus what was logged at earlier meals,
@@ -288,7 +313,7 @@ def read_meal_target(user_id: int, date: date, meal: str, session: SessionDep):
     return {"date": date, "meal": meal.strip().lower(), "daily_target": daily, **result}
 
 
-@app.get("/users/{user_id}/progress")
+@app.get("/users/{user_id}/progress", dependencies=[OwnerOnly])
 def read_progress(user_id: int, date: date, session: SessionDep):
     """Target vs actual for one day, plus the weight history for the trend chart."""
     daily = _daily_targets_or_404(session, user_id)
@@ -338,7 +363,7 @@ def _is_valid_recommendation(result) -> bool:
         return False
 
 
-@app.get("/recommendations/meals")
+@app.get("/recommendations/meals", dependencies=[OwnerOnly])
 def recommend_meal(user_id: int, hall: str, date: date, meal: str, session: SessionDep, avoid: str | None = None):
     """
     Recommended dishes for one meal: aims at the meal's target from GET /users/{id}/meal-target,
@@ -372,7 +397,7 @@ def _default_option(options: list[str]) -> str:
     return "lunch" if "lunch" in options else options[0]
 
 
-@app.get("/users/{user_id}/hall-picks")
+@app.get("/users/{user_id}/hall-picks", dependencies=[OwnerOnly])
 def hall_picks(user_id: int, date: date, meal: str, session: SessionDep):
     """
     Which hall suits the user best for a meal ("breakfast", "lunch" or "dinner"): at every hall that

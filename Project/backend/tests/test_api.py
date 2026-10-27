@@ -55,15 +55,111 @@ def client():
     app.dependency_overrides.clear()
 
 
-def make_user(client, **overrides):
-    r = client.post("/users", json={**PROFILE, **overrides})
+PASSWORD = "correct horse"
+
+
+def log_in_as(client, token):
+    client.headers["Authorization"] = f"Bearer {token}"
+
+
+def make_user(client, password=PASSWORD, **overrides):
+    """Sign up and send that user's token on every later request; returns the user id."""
+    r = client.post("/auth/signup", json={**PROFILE, "password": password, **overrides})
     assert r.status_code == 201, r.text
-    return r.json()["id"]
+    log_in_as(client, r.json()["token"])
+    return r.json()["user"]["id"]
 
 
 def test_activity_level_must_be_a_known_value(client):
-    r = client.post("/users", json={**PROFILE, "activity_level": "couch potato"})
+    r = client.post("/auth/signup", json={**PROFILE, "password": PASSWORD, "activity_level": "couch potato"})
     assert r.status_code == 422
+
+
+def test_sign_up_then_log_in(client):
+    uid = make_user(client, email="Val@Example.com")
+    me = client.get("/auth/me").json()
+    assert me["id"] == uid and me["email"] == "val@example.com"  # stored lowercase
+    assert "password" not in me and "password_hash" not in me
+
+    r = client.post("/auth/login", json={"email": " VAL@example.com", "password": PASSWORD})
+    assert r.status_code == 200 and r.json()["user"]["id"] == uid
+    log_in_as(client, r.json()["token"])
+    assert client.get(f"/users/{uid}").status_code == 200
+
+
+def test_sign_up_errors(client):
+    make_user(client)
+    r = client.post("/auth/signup", json={**PROFILE, "email": "VAL@example.com", "password": PASSWORD})
+    assert r.status_code == 409  # same email in another case
+    assert client.post("/auth/signup", json={**PROFILE, "email": "x@example.com", "password": "short"}).status_code == 422
+    assert client.post("/auth/signup", json={**PROFILE, "email": "x@example.com", "password": "é" * 40}).status_code == 422
+    assert client.post("/auth/signup", json=PROFILE).status_code == 422  # no password
+
+
+def test_wrong_password_and_unknown_email_look_the_same(client):
+    make_user(client)
+    wrong = client.post("/auth/login", json={"email": PROFILE["email"], "password": "nope nope"})
+    unknown = client.post("/auth/login", json={"email": "who@example.com", "password": PASSWORD})
+    assert wrong.status_code == unknown.status_code == 401
+    assert wrong.json() == unknown.json()
+
+
+def test_accounts_from_before_login_cannot_log_in(client):
+    from app.models import User
+
+    session = next(app.dependency_overrides[get_session]())
+    session.add(User(name="Old", email="old@example.com"))  # no password_hash
+    session.commit()
+    assert client.post("/auth/login", json={"email": "old@example.com", "password": PASSWORD}).status_code == 401
+
+
+def test_user_endpoints_need_the_owners_token(client):
+    uid = make_user(client)
+    other = make_user(client, email="b@example.com")  # now logged in as `other`
+    assert client.get(f"/users/{uid}").status_code == 403
+    assert client.get(f"/users/{uid}/goal").status_code == 403
+    assert client.put(f"/users/{uid}/goal", json={"goal_type": "lose"}).status_code == 403
+    assert client.get("/menu-items", params={"hall": ISR, "date": DAY, "user_id": uid}).status_code == 403
+    assert client.get(f"/users/{other}").status_code == 200
+
+    client.headers.pop("Authorization")
+    assert client.get(f"/users/{other}").status_code == 401
+    assert client.get("/auth/me").status_code == 401
+    log_in_as(client, "not-a-token")
+    assert client.get(f"/users/{other}").status_code == 401
+    # Endpoints that don't name a user stay open
+    client.headers.pop("Authorization")
+    assert client.get("/menu-items", params={"hall": ISR, "date": DAY}).status_code == 200
+    assert client.get("/halls").status_code == 200
+
+
+def test_expired_token_is_rejected(client, monkeypatch):
+    from datetime import timedelta
+
+    from app import auth
+
+    uid = make_user(client)
+    monkeypatch.setattr(auth, "TOKEN_LIFETIME", timedelta(seconds=-1))
+    log_in_as(client, auth.create_token(uid))
+    assert client.get(f"/users/{uid}").status_code == 401
+
+
+def test_missing_columns_are_added_to_an_existing_table():
+    from sqlalchemy import inspect, text
+
+    from app.database import create_db_and_tables
+
+    engine = create_engine("sqlite://", poolclass=StaticPool)
+    with engine.begin() as conn:  # the user table as it was before login existed
+        conn.execute(text('CREATE TABLE "user" (id INTEGER PRIMARY KEY, name VARCHAR NOT NULL, email VARCHAR NOT NULL, '
+                          'weight_lbs FLOAT, height_in FLOAT, gender VARCHAR, birthdate DATE, activity_level VARCHAR, '
+                          'allergies JSON, dietary_restrictions JSON)'))
+        conn.execute(text("""INSERT INTO "user" (name, email) VALUES ('Old', 'old@example.com')"""))
+    create_db_and_tables(engine)
+    create_db_and_tables(engine)  # running it again changes nothing
+    assert "password_hash" in {c["name"] for c in inspect(engine).get_columns("user")}
+    with engine.connect() as conn:
+        assert conn.execute(text('SELECT name, password_hash FROM "user"')).one() == ("Old", None)
 
 
 def test_set_goal_saves_and_returns_targets(client):
@@ -84,8 +180,8 @@ def test_changing_the_goal_overwrites_the_old_one(client):
 
 
 def test_goal_errors(client):
-    assert client.put("/users/999/goal", json={"goal_type": "lose"}).status_code == 404
     uid = make_user(client)
+    assert client.put("/users/999/goal", json={"goal_type": "lose"}).status_code == 403
     assert client.put(f"/users/{uid}/goal", json={"goal_type": "bulk"}).status_code == 422
     assert client.get(f"/users/{uid}/goal").status_code == 404  # nothing saved yet
     incomplete = make_user(client, email="b@example.com", weight_lbs=None)
@@ -94,11 +190,11 @@ def test_goal_errors(client):
 
 
 def test_cors_allows_the_frontend_origin(client):
-    r = client.options("/users", headers={"Origin": "http://localhost:5173", "Access-Control-Request-Method": "POST"})
+    r = client.options("/auth/signup", headers={"Origin": "http://localhost:5173", "Access-Control-Request-Method": "POST"})
     assert r.headers.get("access-control-allow-origin") == "http://localhost:5173"
-    r = client.options("/users", headers={"Origin": "https://plate-plan.vercel.app", "Access-Control-Request-Method": "POST"})
+    r = client.options("/auth/signup", headers={"Origin": "https://plate-plan.vercel.app", "Access-Control-Request-Method": "POST"})
     assert r.headers.get("access-control-allow-origin") == "https://plate-plan.vercel.app"
-    r = client.options("/users", headers={"Origin": "https://evil.example.com", "Access-Control-Request-Method": "POST"})
+    r = client.options("/auth/signup", headers={"Origin": "https://evil.example.com", "Access-Control-Request-Method": "POST"})
     assert "access-control-allow-origin" not in r.headers
 
 
@@ -138,7 +234,7 @@ def test_menu_items_filtered_for_a_user(client):
     vegan = make_user(client, email="v@example.com", dietary_restrictions=["vegan"])
     names = {i["name"] for i in client.get("/menu-items", params={"hall": ISR, "date": DAY, "meal": "lunch", "user_id": vegan}).json()}
     assert names == {"Veggie Bowl"}
-    assert client.get("/menu-items", params={"hall": ISR, "date": DAY, "user_id": 999}).status_code == 404
+    assert client.get("/menu-items", params={"hall": ISR, "date": DAY, "user_id": 999}).status_code == 403
 
 
 def test_menu_item_does_not_expose_scraper_fields(client):
@@ -194,10 +290,13 @@ def test_progress_sums_the_days_logs_and_can_undo(client):
 
 def test_cannot_undo_someone_elses_log(client):
     a = make_user(client)
-    b = make_user(client, email="b@example.com")
+    a_token = client.headers["Authorization"]
     item = client.get("/menu-items", params={"hall": ISR, "date": DAY}).json()[0]["id"]
     log = client.post(f"/users/{a}/food-logs", json={"item_id": item}).json()
+    b = make_user(client, email="b@example.com")
     assert client.delete(f"/users/{b}/food-logs/{log['id']}").status_code == 404
+    assert client.delete(f"/users/{a}/food-logs/{log['id']}").status_code == 403
+    client.headers["Authorization"] = a_token
     assert client.delete(f"/users/{a}/food-logs/{log['id']}").status_code == 204
 
 
@@ -213,7 +312,7 @@ def test_weight_logs_and_trend(client):
     trend = client.get(f"/users/{uid}/progress", params={"date": DAY}).json()["weight_trend"]
     assert [w["weight_lbs"] for w in trend] == [140.2, 139.4]
     assert client.post(f"/users/{uid}/weight-logs", json={"weight_lbs": 0}).status_code == 422
-    assert client.post("/users/999/weight-logs", json={"weight_lbs": 150}).status_code == 404
+    assert client.post("/users/999/weight-logs", json={"weight_lbs": 150}).status_code == 403
 
 
 def test_recommendation_has_the_documented_shape_and_respects_allergies(client):
@@ -424,7 +523,7 @@ def test_hall_picks_with_nothing_to_show_and_bad_requests(client):
     assert client.get(f"/users/{uid}/hall-picks", params={"date": DAY, "meal": "snack"}).status_code == 422
     r = client.get(f"/users/{uid}/hall-picks", params={"date": "2026-12-01", "meal": "lunch"}).json()
     assert r["halls"] == [] and r["best_match"] is None and r["best_protein"] is None
-    assert client.get("/users/999/hall-picks", params={"date": DAY, "meal": "lunch"}).status_code == 404
+    assert client.get("/users/999/hall-picks", params={"date": DAY, "meal": "lunch"}).status_code == 403
 
 
 def test_hall_picks_follow_what_was_already_logged(client):

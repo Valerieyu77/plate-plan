@@ -10,8 +10,9 @@ Base URL: `http://127.0.0.1:8000` locally. Interactive docs: `/docs`.
 - JSON everywhere. Dates are ISO strings: `"2026-10-08"`.
 - Units: weight in **lbs**, height in **inches**, nutrients in **g** (sodium in mg), energy in **kcal**.
 - All nutrient values on a menu item are **per ONE serving**.
-- No login in the prototype: sign-up returns a `user_id`; the frontend keeps it (e.g. in localStorage) and puts it in the URL.
-- Errors: `404` not found, `409` duplicate email, `422` invalid input. Body: `{"detail": "..."}`.
+- Login: `POST /auth/signup` and `POST /auth/login` return `{token, user}`. Send the token on every request as `Authorization: Bearer <token>`. Every `/users/{id}/...` endpoint, and `user_id=` on `/menu-items` and `/recommendations/meals`, only accepts that user's own token. Tokens last 30 days.
+- Errors: `401` not logged in / bad token / wrong password, `403` someone else's `user_id`, `404` not found, `409` duplicate email, `422` invalid input. Body: `{"detail": "..."}`.
+- The server needs `JWT_SECRET` (a long random string) in `Project/backend/.env` and on Render. Without it, every restart logs everyone out.
 - CORS is enabled for `http://localhost:5173`, `http://localhost:3000` and any `https://*.vercel.app` (PR #9). Tell C if the frontend runs somewhere else.
 
 Status: ✅ built and merged, 🟡 build with mock data first, ⬜ not started.
@@ -20,7 +21,7 @@ Status: ✅ built and merged, 🟡 build with mock data first, ⬜ not started.
 
 | Step in the app | Endpoint |
 |---|---|
-| Sign up with body info | `POST /users` ✅ |
+| Sign up with body info / log in | `POST /auth/signup` ✅, `POST /auth/login` ✅, `GET /auth/me` ✅ |
 | Set a goal, get daily targets | `PUT /users/{id}/goal` ✅ |
 | Pick a meal first, then a hall that serves it | `GET /halls?meal=` ✅, `GET /meal-options` ✅ |
 | See this meal's target and the dishes the user can eat | `GET /users/{id}/meal-target` ✅, `GET /menu-items?user_id=` ✅ |
@@ -33,11 +34,11 @@ Everything marked ✅ is in PR #9 (or already merged) and has tests.
 
 ## Endpoints
 
-### `POST /users` ✅
-Create a user. Returns `201` with the user (including `id`), `409` if the email exists.
+### `POST /auth/signup` ✅
+Create an account. Returns `201` with `{"token": "...", "user": {...}}` (the user includes `id`), `409` if the email exists (any letter case). Emails are stored lowercase. Passwords are 8–72 bytes and only a bcrypt hash is kept.
 ```json
 {
-  "name": "Val", "email": "val@example.com",
+  "name": "Val", "email": "val@example.com", "password": "correct horse",
   "weight_lbs": 140, "height_in": 64, "gender": "female",
   "birthdate": "2004-05-17", "activity_level": "moderate",
   "allergies": ["Milk", "Peanuts"],
@@ -47,6 +48,12 @@ Create a user. Returns `201` with the user (including `id`), `409` if the email 
 - `allergies` names: Milk, Eggs, Fish, Shellfish, Peanuts, Tree Nuts, Soy, Wheat, Gluten, Sesame, Corn, Coconut, Sulfites, MSG, Red Dye.
 - `dietary_restrictions`: vegetarian, vegan, kosher, halal, jain, no pork, no alcohol, no gelatin. (See `app/dietary.py`.)
 - `activity_level` (optional, default `light`): one of `sedentary`, `light`, `moderate`, `active`, `very_active`. Anything else gets `422`.
+
+### `POST /auth/login` ✅
+`{"email": "...", "password": "..."}` → `{"token": "...", "user": {...}}`. Returns `401 "Incorrect email or password"` for a wrong password or an unknown email alike. Accounts made before login existed have no password and can't log in; sign up again.
+
+### `GET /auth/me` ✅
+The user the token belongs to. The frontend calls it on page load to restore the session.
 
 ### `GET /users/{id}` ✅
 Returns the same shape as above plus `id`.

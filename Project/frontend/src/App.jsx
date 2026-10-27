@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react'
-import { getGoal, getUser, onWaking } from './api'
+import { getGoal, getMe, onUnauthorized, onWaking } from './api'
 import { Button, Card, Loading } from './components/ui'
 import AuthPage from './pages/AuthPage'
 import GoalPage from './pages/GoalPage'
 import PlanPage from './pages/PlanPage'
 import ProgressPage from './pages/ProgressPage'
-import { clearUserId, getUserId, rememberAccount, setUserId } from './session'
+import { clearToken, getToken, setLastEmail, setToken } from './session'
 
 // Tiny hash router: #/ (sign up / log in), #/goal, #/plan, #/progress
 const currentRoute = () => window.location.hash.replace(/^#/, '') || '/'
@@ -36,39 +36,36 @@ const TABS = [
 export default function App() {
   const route = useRoute()
   const [user, setUser] = useState(null)
-  const [restoring, setRestoring] = useState(() => getUserId() !== null)
+  const [restoring, setRestoring] = useState(() => getToken() !== null)
   const [restoreError, setRestoreError] = useState('')
   const [waking, setWaking] = useState(false)
 
   useEffect(() => onWaking(setWaking), [])
 
-  // Reload the signed-in user from the id saved in localStorage. If the server can't be reached,
-  // keep the saved id and offer "Try again" rather than showing the sign-up page.
-  const loadUser = (id) =>
-    getUser(id)
-      .then((u) => {
-        setUser(u)
-        rememberAccount(u)
-      })
+  // Reload the signed-in user from the token saved in localStorage. If the server can't be reached,
+  // keep the token and offer "Try again" rather than showing the log-in page. A rejected token
+  // (expired, or the account is gone) is handled by onUnauthorized below.
+  const loadUser = () =>
+    getMe()
+      .then(setUser)
       .catch((err) => {
-        if (err.status === 404) clearUserId()
-        else setRestoreError(err.message)
+        if (err.status !== 401) setRestoreError(err.message)
       })
       .finally(() => setRestoring(false))
 
   useEffect(() => {
-    const id = getUserId()
-    if (id !== null) loadUser(id)
+    if (getToken() !== null) loadUser()
   }, [])
 
   const retryRestore = () => {
     setRestoring(true)
     setRestoreError('')
-    loadUser(getUserId())
+    loadUser()
   }
 
-  const signedIn = async (u, { isNew }) => {
-    setUserId(u.id)
+  const signedIn = async ({ token, user: u }, { isNew }) => {
+    setToken(token)
+    setLastEmail(u.email)
     setUser(u)
     setRestoreError('')
     if (isNew) return navigate('/goal')
@@ -81,11 +78,14 @@ export default function App() {
   }
 
   const logOut = () => {
-    clearUserId()
+    clearToken()
     setRestoreError('')
     setUser(null)
     navigate('/')
   }
+
+  // The server rejected the saved token: back to the log-in page
+  useEffect(() => onUnauthorized(logOut), [])
 
   let page
   if (restoring) page = <Loading />

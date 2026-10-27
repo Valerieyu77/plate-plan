@@ -1,5 +1,7 @@
 // Every call to the FastAPI backend goes through this file. See Docs/API.md for the shapes.
 // To point at the deployed backend, set VITE_API_URL in .env.local (or in Vercel's settings).
+import { getToken } from './session'
+
 export const API_URL = (import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000').replace(/\/+$/, '')
 
 export class ApiError extends Error {
@@ -58,13 +60,17 @@ async function request(path, { method = 'GET', body, query } = {}) {
   }
   const slowTimer = setTimeout(markWaking, SLOW_MS)
 
+  const token = getToken()
   let res
   try {
     for (let attempt = 0; ; attempt++) {
       try {
         res = await fetch(url, {
           method,
-          headers: body ? { 'Content-Type': 'application/json' } : undefined,
+          headers: {
+            ...(body ? { 'Content-Type': 'application/json' } : {}),
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
           body: body ? JSON.stringify(body) : undefined,
         })
         if (!WAKING_STATUSES.includes(res.status) || attempt === RETRY_DELAYS_MS.length) break
@@ -83,13 +89,30 @@ async function request(path, { method = 'GET', body, query } = {}) {
 
   if (res.status === 204) return null
   const data = await res.json().catch(() => null)
-  if (!res.ok) throw new ApiError(res.status, detailMessage(data) || `Request failed (${res.status})`)
+  if (!res.ok) {
+    // A 401 from anything but the login form means the saved login is gone or expired
+    if (res.status === 401 && token) unauthorizedListeners.forEach((fn) => fn())
+    throw new ApiError(res.status, detailMessage(data) || `Request failed (${res.status})`)
+  }
   return data
 }
 
+const unauthorizedListeners = new Set()
+// Calls fn() when the server rejects the saved login token. Returns an unsubscribe function.
+export function onUnauthorized(fn) {
+  unauthorizedListeners.add(fn)
+  return () => unauthorizedListeners.delete(fn)
+}
+
+// ---------- Accounts ----------
+
+// Both return {token, user}; the caller saves the token (see session.js)
+export const signUp = (user) => request('/auth/signup', { method: 'POST', body: user })
+export const logIn = (email, password) => request('/auth/login', { method: 'POST', body: { email, password } })
+export const getMe = () => request('/auth/me')
+
 // ---------- Users and goals ----------
 
-export const createUser = (user) => request('/users', { method: 'POST', body: user })
 export const getUser = (userId) => request(`/users/${userId}`)
 
 export const setGoal = (userId, goalType) => request(`/users/${userId}/goal`, { method: 'PUT', body: { goal_type: goalType } })
