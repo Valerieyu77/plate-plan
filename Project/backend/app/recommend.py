@@ -187,6 +187,60 @@ def recommend(target: dict, items: list[dict], max_servings: float = 3.0, avoid_
     return _result(lines, target)
 
 
+WORKOUT_FOCUS = {"lose": "cardio", "maintain": "mixed", "gain": "strength"}
+WORKOUT_MINUTES = {"light": 20, "moderate": 35, "hard": 50}
+SURPLUS_KCAL = 200  # eating this much over the goal calls for a harder session (and this much under, an easier one)
+
+
+def recommend_workout(goal_type: str, calorie_goal: float, kcal_eaten: float) -> dict:
+    """
+    Suggest a workout for today from the user's goal and how much they have eaten so far.
+
+    goal_type: "lose", "maintain" or "gain" (see GOAL_TYPES in models.py)
+    calorie_goal: the user's daily calorie goal
+    kcal_eaten: calories eaten today
+
+    Returns:
+        {
+          "focus":     "cardio" | "mixed" | "strength",
+          "intensity": "light" | "moderate" | "hard",
+          "minutes":   35,
+          "exercises": [],   # TODO: fill in with {"name": ..., "sets": ..., "reps": ..., "minutes": ...}
+          "note":      "You are 300 kcal over your goal: a harder session today.",
+        }
+
+    This is a template: it picks the kind of session, but the exercises themselves are left empty
+    for now (see _exercises_for).
+    """
+    focus = WORKOUT_FOCUS.get(goal_type, "mixed")
+    balance = kcal_eaten - calorie_goal  # > 0 means over the goal
+
+    if balance > SURPLUS_KCAL:
+        intensity = "hard"
+        note = f"You are {balance:.0f} kcal over your goal: a harder session today."
+    elif balance < -SURPLUS_KCAL:
+        # Training hard on an empty tank is a bad idea, and someone trying to gain needs those calories
+        intensity = "light"
+        note = f"You are {-balance:.0f} kcal under your goal: keep it light and eat enough today."
+    else:
+        intensity = "moderate"
+        note = None
+
+    return {
+        "focus": focus,
+        "intensity": intensity,
+        "minutes": WORKOUT_MINUTES[intensity],
+        "exercises": _exercises_for(focus, intensity),
+        "note": note,
+    }
+
+
+def _exercises_for(focus: str, intensity: str) -> list[dict]:
+    """TODO: return the actual exercises for this kind of session, e.g.
+    [{"name": "Squats", "sets": 3, "reps": 10}, {"name": "Jog", "minutes": 20}]"""
+    return []
+
+
 def _result(lines: list[dict], target: dict, note: str | None = None) -> dict:
     total = {k: round(sum(line[k] for line in lines), 1) for k in NUTRIENTS}
     if note is None:
