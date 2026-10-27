@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { logIn, signUp } from '../api'
 import { Button, Card, ErrorNote, Field, Input, Segmented, Select, TagInput } from '../components/ui'
 import { ACTIVITY_LEVELS, ALLERGIES, DIETARY_RESTRICTIONS, todayISO } from '../constants'
-import { getLastEmail, setPrefs } from '../session'
+import { getLastEmail } from '../session'
 
 const EMPTY_FORM = {
   name: '',
@@ -16,7 +16,6 @@ const EMPTY_FORM = {
   activity: 'light',
   allergies: [],
   diet: [],
-  targetWeight: '',
 }
 
 export default function AuthPage({ onSignedIn }) {
@@ -97,7 +96,6 @@ function SignUpForm({ onSignedIn, onExistingEmail }) {
         allergies: form.allergies,
         dietary_restrictions: form.diet,
       })
-      if (form.targetWeight) setPrefs(auth.user.id, { targetWeight: Number(form.targetWeight) })
       onSignedIn(auth, { isNew: true })
     } catch (err) {
       setError({ message: err.status === 409 ? 'An account with this email already exists.' : err.message, duplicate: err.status === 409 })
@@ -192,12 +190,6 @@ function SignUpForm({ onSignedIn, onExistingEmail }) {
             />
           </div>
         </div>
-      </div>
-
-      <div className="border-t border-line pt-5">
-        <Field label="Target weight (lb, optional)" hint="Shown on your progress chart.">
-          <Input type="number" inputMode="decimal" min="50" max="700" step="0.1" value={form.targetWeight} onChange={set('targetWeight')}  />
-        </Field>
       </div>
 
       {error && (

@@ -552,3 +552,72 @@ def test_best_protein_never_names_a_hall_without_a_high_protein_plate(client, mo
     r = client.get(f"/users/{uid}/hall-picks", params={"date": DAY, "meal": "lunch"}).json()
     assert r["halls"] and r["best_match"]  # the hall comparison still works
     assert r["best_protein"] is None
+
+
+# ---------- Goal timelines ----------
+
+def _in_days(n):
+    from datetime import date, timedelta
+    return (date.today() + timedelta(days=n)).isoformat()
+
+
+def test_preview_a_timeline_goal(client):
+    uid = make_user(client)
+    r = client.post(f"/users/{uid}/goal/preview", json={"target_weight_lbs": 130, "target_date": _in_days(56)})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["goal_type"] == "lose" and body["weekly_rate_lbs"] == 1.25 and body["tier"] == "aggressive"
+    assert body["daily_calorie_change"] == -625 and body["calorie_goal"] > 1200
+    assert client.get(f"/users/{uid}/goal").status_code == 404  # previews are not saved
+
+    unsafe = client.post(f"/users/{uid}/goal/preview", json={"target_weight_lbs": 120, "target_date": _in_days(2)}).json()
+    assert unsafe["tier"] == "unsafe" and unsafe["issues"] and unsafe["alternatives"]["earliest_date"]
+
+
+def test_an_unsafe_timeline_is_not_saved(client):
+    uid = make_user(client)
+    r = client.put(f"/users/{uid}/goal", json={"target_weight_lbs": 120, "target_date": _in_days(2)})
+    assert r.status_code == 422 and "7 days" in r.json()["detail"]
+    assert client.get(f"/users/{uid}/goal").status_code == 404
+
+
+def test_save_a_timeline_and_follow_it(client):
+    uid = make_user(client)
+    r = client.put(f"/users/{uid}/goal", json={"target_weight_lbs": 135, "target_date": _in_days(56)})
+    assert r.status_code == 200, r.text
+    saved = r.json()
+    assert saved["goal_type"] == "lose" and saved["tier"] == "healthy" and saved["start_weight_lbs"] == 140
+    assert saved["weekly_rate_lbs"] == 0.62 and saved["warning"] is None
+
+    t = client.get(f"/users/{uid}/goal/timeline").json()
+    assert t["planned"][0]["weight_lbs"] == 140 and t["planned"][-1]["weight_lbs"] == 135
+    assert t["status"] == "on_track" and t["actual"] == []
+
+    # A big early drop means less is left to lose, so the daily deficit shrinks
+    client.post(f"/users/{uid}/weight-logs", json={"weight_lbs": 137})
+    after = client.get(f"/users/{uid}/goal").json()
+    assert after["weekly_rate_lbs"] < saved["weekly_rate_lbs"]
+    t = client.get(f"/users/{uid}/goal/timeline").json()
+    assert t["status"] == "ahead" and t["actual"][0]["weight_lbs"] == 137
+
+
+def test_an_aggressive_timeline_is_saved_with_a_warning(client):
+    uid = make_user(client)
+    body = client.put(f"/users/{uid}/goal", json={"target_weight_lbs": 130, "target_date": _in_days(56)}).json()
+    assert body["tier"] == "aggressive" and "fast side" in body["warning"]
+
+
+def test_a_plain_goal_type_clears_the_timeline(client):
+    uid = make_user(client)
+    client.put(f"/users/{uid}/goal", json={"target_weight_lbs": 135, "target_date": _in_days(56)})
+    body = client.put(f"/users/{uid}/goal", json={"goal_type": "maintain"}).json()
+    assert body["goal_type"] == "maintain" and body["target_date"] is None and body["tier"] is None
+    assert client.get(f"/users/{uid}/goal/timeline").status_code == 404
+
+
+def test_timeline_goal_input_errors(client):
+    uid = make_user(client)
+    assert client.put(f"/users/{uid}/goal", json={"target_weight_lbs": 130}).status_code == 422
+    assert client.put(f"/users/{uid}/goal", json={}).status_code == 422
+    assert client.put(f"/users/{uid}/goal", json={"target_weight_lbs": 130, "target_date": _in_days(-1)}).status_code == 422
+    assert client.post(f"/users/{uid}/goal/preview", json={"goal_type": "lose"}).status_code == 422

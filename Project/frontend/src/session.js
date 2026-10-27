@@ -31,6 +31,6 @@ export const clearToken = () => write(TOKEN_KEY, null)
 export const getLastEmail = () => read(LAST_EMAIL_KEY, '')
 export const setLastEmail = (email) => write(LAST_EMAIL_KEY, email)
 
-// Things the backend doesn't store yet: the chosen goal type and the target weight
+// Per-user conveniences the backend doesn't need, e.g. the last hall picked on the Plan page
 export const getPrefs = (userId) => read(prefsKey(userId), {})
 export const setPrefs = (userId, prefs) => write(prefsKey(userId), { ...getPrefs(userId), ...prefs })

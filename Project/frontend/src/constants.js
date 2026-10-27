@@ -18,9 +18,9 @@ export const ACTIVITY_LEVELS = [
 ]
 
 export const GOALS = {
-  lose: { label: 'Lose weight', note: '450 kcal a day below what you burn: about 0.9 lb a week. No end date.' },
+  lose: { label: 'Lose weight', note: 'Pick a target weight and date; we set a safe daily calorie budget.' },
   maintain: { label: 'Maintain', note: 'Eat what your body uses.' },
-  gain: { label: 'Gain muscle', note: '400 kcal a day above what you burn: about 0.8 lb a week. No end date.' },
+  gain: { label: 'Gain muscle', note: 'Pick a target weight and date; we add calories at a safe pace.' },
 }
 
 // YYYY-MM-DD in the user's local time zone (toISOString alone would use UTC)

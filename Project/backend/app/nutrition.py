@@ -50,9 +50,21 @@ def bmr(weight_lbs: float, height_in: float, age: int, gender: str) -> float:
     return 10 * kg + 6.25 * cm - 5 * age + constant
 
 
-def daily_targets(user, goal_type: str, today: date | None = None) -> dict:
+def tdee(user, today: date | None = None) -> float:
+    """Calories burned per day (BMR x activity factor). The profile must be complete."""
+    age = age_from_birthdate(user.birthdate, today)
+    factor = ACTIVITY_FACTORS.get(user.activity_level or DEFAULT_ACTIVITY, ACTIVITY_FACTORS[DEFAULT_ACTIVITY])
+    return bmr(user.weight_lbs, user.height_in, age, user.gender) * factor
+
+
+def calorie_floor(user) -> int:
+    return MIN_CALORIES.get((user.gender or "").strip().lower(), DEFAULT_MIN_CALORIES)
+
+
+def daily_targets(user, goal_type: str, today: date | None = None, calorie_offset: float | None = None) -> dict:
     """
     Returns calorie_goal, protein_goal_g, carb_goal_g, fat_goal_g and a warning (or None).
+    calorie_offset replaces the goal type's fixed offset (a timeline goal sets its own; see timeline.py).
     Raises ValueError if the profile is incomplete or the goal type is unknown.
     """
     if goal_type not in GOAL_OFFSETS:
@@ -61,12 +73,9 @@ def daily_targets(user, goal_type: str, today: date | None = None) -> dict:
     if missing:
         raise ValueError(f"profile is missing: {', '.join(missing)}")
 
-    age = age_from_birthdate(user.birthdate, today)
-    factor = ACTIVITY_FACTORS.get(user.activity_level or DEFAULT_ACTIVITY, ACTIVITY_FACTORS[DEFAULT_ACTIVITY])
-    tdee = bmr(user.weight_lbs, user.height_in, age, user.gender) * factor
-
-    calories = tdee + GOAL_OFFSETS[goal_type]
-    floor = MIN_CALORIES.get((user.gender or "").strip().lower(), DEFAULT_MIN_CALORIES)
+    offset = GOAL_OFFSETS[goal_type] if calorie_offset is None else calorie_offset
+    calories = tdee(user, today) + offset
+    floor = calorie_floor(user)
     warning = None
     if calories < floor:
         calories = floor

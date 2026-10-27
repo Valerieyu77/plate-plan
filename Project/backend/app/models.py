@@ -1,6 +1,6 @@
 from datetime import date
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from sqlalchemy import UniqueConstraint
 from sqlmodel import SQLModel, Field, Column, JSON
 
@@ -78,7 +78,15 @@ class Goal(SQLModel, table=True):
     # user_id is the primary key, so each user can only have one goal row
     user_id: int = Field(foreign_key="user.id", primary_key=True)
 
+    goal_type: str | None = None  # "lose", "maintain" or "gain"
     target_weight_lbs: float | None = None
+
+    # Timeline (all None for a plain lose / maintain / gain goal): where the user started, when they
+    # want to reach target_weight_lbs, and the pace now planned (lb/week; updated on each weigh-in)
+    start_date: date | None = None
+    start_weight_lbs: float | None = None
+    target_date: date | None = None
+    weekly_rate_lbs: float | None = None
 
     # Daily nutrition goals
     calorie_goal: int | None = None
@@ -89,25 +97,50 @@ class Goal(SQLModel, table=True):
 
 
 class GoalCreate(SQLModel):
-    goal_type: str  # "lose", "maintain" or "gain"
+    """
+    Either a plain goal type ({"goal_type": "lose"}: a fixed daily offset), or a timeline
+    ({"target_weight_lbs": 130, "target_date": "2026-12-20"}: the pace sets the calories, and
+    goal_type follows from the target).
+    """
+    goal_type: str | None = None
+    target_weight_lbs: float | None = Field(default=None, gt=0)
+    target_date: Date | None = None
 
     @field_validator("goal_type")
     @classmethod
     def _check_goal_type(cls, v):
-        if v not in GOAL_TYPES:
+        if v is not None and v not in GOAL_TYPES:
             raise ValueError(f"goal_type must be one of {GOAL_TYPES}")
         return v
+
+    @model_validator(mode="after")
+    def _goal_type_or_timeline(self):
+        if (self.target_weight_lbs is None) != (self.target_date is None):
+            raise ValueError("send target_weight_lbs and target_date together")
+        if self.goal_type is None and self.target_date is None:
+            raise ValueError("send goal_type, or target_weight_lbs and target_date")
+        return self
+
+    @property
+    def has_timeline(self) -> bool:
+        return self.target_date is not None
 
 
 class GoalPublic(SQLModel):
     user_id: int
+    goal_type: str | None = None
     target_weight_lbs: float | None = None
+    start_date: Date | None = None
+    start_weight_lbs: float | None = None
+    target_date: Date | None = None
+    weekly_rate_lbs: float | None = None
     calorie_goal: int | None = None
     protein_goal_g: int | None = None
     carb_goal_g: int | None = None
     fat_goal_g: int | None = None
     sugar_limit_g: int | None = None
-    warning: str | None = None  # set when the calorie target was raised to the safe minimum
+    tier: str | None = None  # "healthy" or "aggressive" for a timeline goal
+    warning: str | None = None  # set when the calorie target was raised to the safe minimum, or the pace is aggressive
 
 
 # ---------- Weight log ----------
