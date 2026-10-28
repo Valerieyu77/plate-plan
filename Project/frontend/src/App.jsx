@@ -3,11 +3,12 @@ import { getGoal, getMe, onUnauthorized, onWaking } from './api'
 import { Button, Card, Loading } from './components/ui'
 import AuthPage from './pages/AuthPage'
 import GoalPage from './pages/GoalPage'
+import HomePage from './pages/HomePage'
 import PlanPage from './pages/PlanPage'
 import ProgressPage from './pages/ProgressPage'
 import { clearToken, getToken, setLastEmail, setToken } from './session'
 
-// Tiny hash router: #/ (sign up / log in), #/goal, #/plan, #/progress
+// Tiny hash router: #/ (sign up / log in), #/home, #/goal, #/plan, #/progress
 const currentRoute = () => window.location.hash.replace(/^#/, '') || '/'
 const navigate = (path) => {
   window.location.hash = path
@@ -28,6 +29,7 @@ function useRoute() {
 
 // Bottom tab bar: [path, label, icon path data (24x24, stroked)]
 const TABS = [
+  ['/home', 'Home', 'M3 11l9-8 9 8M5 9.5V21h5v-6h4v6h5V9.5'],
   ['/plan', 'Plan', 'M4 6h16M4 12h16M4 18h10'],
   ['/progress', 'Progress', 'M12 3a9 9 0 1 0 9 9M12 3v9h9'],
   ['/goal', 'Goal', 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Zm0-4a5 5 0 1 0 0-10 5 5 0 0 0 0 10Zm0-4a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z'],
@@ -71,7 +73,7 @@ export default function App() {
     if (isNew) return navigate('/goal')
     try {
       await getGoal(u.id)
-      navigate('/plan')
+      navigate('/home')
     } catch {
       navigate('/goal')
     }
@@ -105,7 +107,8 @@ export default function App() {
   else if (!user || route === '/') page = <AuthPage onSignedIn={signedIn} />
   else if (route === '/goal') page = <GoalPage user={user} onContinue={() => navigate('/plan')} />
   else if (route === '/progress') page = <ProgressPage user={user} onSetGoal={() => navigate('/goal')} />
-  else page = <PlanPage user={user} onSetGoal={() => navigate('/goal')} />
+  else if (route === '/plan') page = <PlanPage user={user} onSetGoal={() => navigate('/goal')} />
+  else page = <HomePage user={user} onNavigate={navigate} />
 
   const inApp = user && !restoring && route !== '/'
 
@@ -113,7 +116,7 @@ export default function App() {
     <div className="min-h-dvh">
       <header className="sticky top-0 z-20 border-b border-line/70 bg-bg/85 backdrop-blur-md">
         <div className="mx-auto flex h-14 max-w-xl items-center justify-between px-4">
-          <a href={user ? '#/plan' : '#/'} className="flex items-center gap-2">
+          <a href={user ? '#/home' : '#/'} className="flex items-center gap-2">
             <span className="grid h-8 w-8 place-items-center rounded-lg bg-brand text-base font-bold text-white">P</span>
             <span className="text-[17px] font-bold tracking-tight">Plate Plan</span>
           </a>
@@ -142,10 +145,10 @@ export default function App() {
 
       {inApp && (
         <nav className="fixed inset-x-0 bottom-0 z-20 border-t border-line bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-md">
-          <div className="mx-auto grid max-w-xl grid-cols-3">
+          <div className="mx-auto grid max-w-xl grid-cols-4">
             {TABS.map(([path, label, icon]) => {
-              // Any unknown route shows the Plan page, so highlight Plan for it too
-              const active = route === path || (path === '/plan' && !TABS.some(([p]) => p === route))
+              // Any unknown route shows the Home page, so highlight Home for it too
+              const active = route === path || (path === '/home' && !TABS.some(([p]) => p === route))
               return (
                 <a
                   key={path}
