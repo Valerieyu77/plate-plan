@@ -451,8 +451,15 @@ function ServingStepper({ name, servings, busy, onChange }) {
   const btn = 'grid h-7 w-7 place-items-center rounded-full text-lg leading-none font-semibold transition-colors disabled:opacity-40'
   const [draft, setDraft] = useState(null) // what is being typed; null when not editing
   const [invalid, setInvalid] = useState(false)
+  // Escape blurs the field before React re-renders, so commit() would still see the typed draft
+  const cancelled = useRef(false)
 
   const commit = () => {
+    if (cancelled.current) {
+      cancelled.current = false
+      setDraft(null)
+      return
+    }
     if (draft === null) return
     const n = Math.round(Number(draft) * 100) / 100
     if (draft.trim() === '' || !Number.isFinite(n) || n < 0 || n > MAX_TYPED_SERVINGS) {
@@ -494,7 +501,7 @@ function ServingStepper({ name, servings, busy, onChange }) {
           onKeyDown={(e) => {
             if (e.key === 'Enter') e.currentTarget.blur()
             else if (e.key === 'Escape') {
-              setDraft(null)
+              cancelled.current = true
               e.currentTarget.blur()
             }
           }}
