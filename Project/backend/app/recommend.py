@@ -189,56 +189,48 @@ def recommend(target: dict, items: list[dict], max_servings: float = 3.0, avoid_
 
 WORKOUT_FOCUS = {"lose": "cardio", "maintain": "mixed", "gain": "strength"}
 WORKOUT_MINUTES = {"light": 20, "moderate": 35, "hard": 50}
-SURPLUS_KCAL = 200  # eating this much over the goal calls for a harder session (and this much under, an easier one)
+SURPLUS_KCAL = 200  # this far over or under the calorie goal gets a note
 
 
-def recommend_workout(goal_type: str, calorie_goal: float, kcal_eaten: float) -> dict:
+def recommend_workout(goal_type: str, calorie_goal: float, kcal_eaten: float, intensity: str | None = None,
+                      minutes: int | None = None, focus: str | None = None, muscles: list[str] | None = None,
+                      weight_lbs: float | None = None, no_equipment: bool = False, avoid=(), seed: str = "") -> dict:
     """
-    Suggest a workout for today from the user's goal and how much they have eaten so far.
+    Suggest a workout for today. Working out is the user's choice, so they pick the intensity
+    (default moderate), and may pick the length, the focus, the muscle groups and "no equipment".
+    The goal only sets the default focus. What was eaten never makes the workout harder: exercise
+    is not a punishment for eating. It only changes the note.
 
     goal_type: "lose", "maintain" or "gain" (see GOAL_TYPES in models.py)
     calorie_goal: the user's daily calorie goal
     kcal_eaten: calories eaten today
 
-    Returns:
-        {
-          "focus":     "cardio" | "mixed" | "strength",
-          "intensity": "light" | "moderate" | "hard",
-          "minutes":   35,
-          "exercises": [],   # TODO: fill in with {"name": ..., "sets": ..., "reps": ..., "minutes": ...}
-          "note":      "You are 300 kcal over your goal: a harder session today.",
-        }
-
-    This is a template: it picks the kind of session, but the exercises themselves are left empty
-    for now (see _exercises_for).
+    Returns {"focus", "intensity", "minutes", "exercises", "total_kcal", "note"}; the exercises come
+    from app/workout.py (each with equipment, sets/reps or minutes, how-to steps and a video link).
+    Raises ValueError for an unknown focus, intensity or muscle group, or a length out of range.
     """
-    focus = WORKOUT_FOCUS.get(goal_type, "mixed")
-    balance = kcal_eaten - calorie_goal  # > 0 means over the goal
+    from .workout import build_plan  # imported here so recommend() keeps working even if workout.py breaks
 
+    intensity = intensity or "moderate"
+    if not focus:
+        # Picking only muscle groups means strength work on them; only "heart" means cardio
+        if muscles:
+            focus = "cardio" if set(muscles) == {"heart"} else "strength"
+        else:
+            focus = WORKOUT_FOCUS.get(goal_type, "mixed")
+
+    balance = kcal_eaten - calorie_goal  # > 0 means over the goal
     if balance > SURPLUS_KCAL:
-        intensity = "hard"
-        note = f"You are {balance:.0f} kcal over your goal: a harder session today."
-    elif balance < -SURPLUS_KCAL:
+        note = f"You have eaten {balance:.0f} kcal more than your goal today. A workout helps, but you don't need to burn it off."
+    elif balance < -SURPLUS_KCAL and kcal_eaten > 0:
         # Training hard on an empty tank is a bad idea, and someone trying to gain needs those calories
-        intensity = "light"
-        note = f"You are {-balance:.0f} kcal under your goal: keep it light and eat enough today."
+        note = f"You are {-balance:.0f} kcal under your goal so far. Eat something first, especially before a hard session."
     else:
-        intensity = "moderate"
         note = None
 
-    return {
-        "focus": focus,
-        "intensity": intensity,
-        "minutes": WORKOUT_MINUTES[intensity],
-        "exercises": _exercises_for(focus, intensity),
-        "note": note,
-    }
-
-
-def _exercises_for(focus: str, intensity: str) -> list[dict]:
-    """TODO: return the actual exercises for this kind of session, e.g.
-    [{"name": "Squats", "sets": 3, "reps": 10}, {"name": "Jog", "minutes": 20}]"""
-    return []
+    plan = build_plan(focus, intensity, minutes or WORKOUT_MINUTES.get(intensity), weight_lbs, muscles,
+                      no_equipment, avoid, seed)
+    return {**plan, "note": note}
 
 
 def _result(lines: list[dict], target: dict, note: str | None = None) -> dict:

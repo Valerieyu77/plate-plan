@@ -1,9 +1,10 @@
 import inspect
 import logging
 from contextlib import asynccontextmanager
-from datetime import date
+from datetime import date, timedelta
 from typing import Annotated
 
+import requests
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import Session, func, select
@@ -12,16 +13,19 @@ from .auth import CurrentUserDep, OwnerOnly, create_token, hash_password, verify
 from .database import create_db_and_tables, get_session
 from .models import (
     AuthResponse, FoodLog, FoodLogCreate, FoodLogPublic, Goal, GoalCreate, GoalPublic, LogIn, MenuItem,
-    MenuItemPublic, User, UserPublic, UserSignUp, WeightLog, WeightLogCreate, WeightLogPublic,
+    MenuItemPublic, User, UserPublic, UserSignUp, WeightLog, WeightLogCreate, WeightLogPublic, WorkoutLog,
+    WorkoutLogCreate, WorkoutLogPublic,
 )
 from .dietary import allowed_for_user
-from .recommend import recommend
+from .recommend import recommend, recommend_workout
 from .timeline import plan_goal, replan, timeline
 from .picks import high_protein_target, match_score, protein_share
 from .nutrition import (
     GROUP_ORDER, MEAL_GROUP, MEAL_ORDER, NUTRIENTS, add_nutrients, daily_targets, day_progress, goal_to_targets,
-    item_nutrients, meal_target, meals_in_group, zero_nutrients,
+    item_nutrients, meal_target, meals_in_group, missing_profile_fields, tdee, zero_nutrients,
 )
+from . import energy, events
+from .exercises import BY_ID as EXERCISES_BY_ID, EXERCISES, MUSCLES, kcal_burned, video_url
 
 log = logging.getLogger(__name__)
 
@@ -507,3 +511,218 @@ def hall_picks(user_id: int, date: date, meal: str, session: SessionDep):
         "best_match": results[0]["hall"] if results else None,
         "best_protein": best_protein["hall"] if best_protein else None,
     }
+
+
+# ---------- Exercises and workout plans ----------
+
+def _today() -> date:
+    """Today's date, for endpoints whose own `date` parameter hides the date class."""
+    return date.today()
+
+
+def _user_or_404(session: Session, user_id: int) -> User:
+    user = session.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return user
+
+
+def _exercise_public(e: dict) -> dict:
+    return {k: v for k, v in e.items() if k not in ("dose", "max_minutes")} | {"video_url": video_url(e)}
+
+
+@app.get("/exercises")
+def list_exercises(kind: str | None = None, muscle: str | None = None, equipment: str | None = None):
+    """The exercise list (app/exercises.py), optionally only one kind ("cardio", "strength",
+    "mobility"), one muscle group, or equipment whose name contains `equipment`."""
+    out = [e for e in EXERCISES
+           if (not kind or e["kind"] == kind)
+           and (not muscle or muscle in e["muscles"])
+           and (not equipment or equipment.lower() in e["equipment"].lower())]
+    return [_exercise_public(e) for e in out]
+
+
+def _kcal_eaten(session: Session, user_id: int, day: date) -> float:
+    return sum(n["kcal"] for n in _consumed_by_meal(session, user_id, day).values())
+
+
+@app.get("/users/{user_id}/workout", dependencies=[OwnerOnly])
+def recommend_user_workout(user_id: int, session: SessionDep, date: date | None = None, intensity: str | None = None,
+                           minutes: int | None = None, focus: str | None = None, muscles: str | None = None,
+                           no_equipment: bool = False, avoid: str | None = None):
+    """
+    A workout for the day. Everything is optional: with nothing set, the goal picks the focus
+    (lose: cardio, maintain: mixed, gain: strength) at moderate intensity for 35 minutes.
+    muscles: comma-separated groups to train (legs, glutes, chest, back, shoulders, arms, core, heart).
+    avoid: comma-separated exercise ids already shown, for "show me another".
+    The same day gives the same plan; each exercise says what equipment to use, for how long,
+    how to do it (with a video search link), and roughly what it burns.
+    """
+    user = _user_or_404(session, user_id)
+    day = date or _today()
+    goal = session.get(Goal, user_id)
+    calorie_goal = goal.calorie_goal if goal and goal.calorie_goal else 0
+    eaten = _kcal_eaten(session, user_id, day)
+    try:
+        plan = recommend_workout(
+            goal.goal_type if goal else "maintain", calorie_goal, eaten if calorie_goal else 0,
+            intensity=intensity, minutes=minutes, focus=focus,
+            muscles=[m.strip().lower() for m in muscles.split(",") if m.strip()] if muscles else None,
+            weight_lbs=user.weight_lbs, no_equipment=no_equipment,
+            avoid=[a.strip() for a in (avoid or "").split(",") if a.strip()], seed=f"{user_id}|{day}",
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    return {"date": day, **plan}
+
+
+# ---------- Workout logs ----------
+
+@app.post("/users/{user_id}/workout-logs", response_model=WorkoutLogPublic, status_code=201, dependencies=[OwnerOnly])
+def create_workout_log(user_id: int, entry: WorkoutLogCreate, session: SessionDep):
+    """Log an exercise. From the list, kcal is estimated from its MET, your weight and the minutes
+    (send kcal to use your own number, e.g. from a watch)."""
+    user = _user_or_404(session, user_id)
+    if entry.exercise_id is not None:
+        exercise = EXERCISES_BY_ID.get(entry.exercise_id)
+        if not exercise:
+            raise HTTPException(status_code=422, detail=f"unknown exercise_id '{entry.exercise_id}'; see GET /exercises")
+        name = entry.name or exercise["name"]
+        kcal = entry.kcal
+        if kcal is None:
+            if not user.weight_lbs:
+                raise HTTPException(status_code=422, detail="add your weight to your profile, or send kcal")
+            kcal = kcal_burned(exercise["met"][entry.intensity], user.weight_lbs, entry.minutes)
+    else:
+        name, kcal = entry.name, entry.kcal
+    log = WorkoutLog(user_id=user_id, date=entry.date or _today(), exercise_id=entry.exercise_id,
+                     name=name, minutes=entry.minutes, intensity=entry.intensity, kcal=round(kcal, 1))
+    session.add(log)
+    session.commit()
+    session.refresh(log)
+    return log
+
+
+@app.get("/users/{user_id}/workout-logs", response_model=list[WorkoutLogPublic], dependencies=[OwnerOnly])
+def list_workout_logs(user_id: int, session: SessionDep, date: date | None = None):
+    _user_or_404(session, user_id)
+    query = select(WorkoutLog).where(WorkoutLog.user_id == user_id)
+    if date:
+        query = query.where(WorkoutLog.date == date)
+    return session.exec(query.order_by(WorkoutLog.date, WorkoutLog.id)).all()
+
+
+@app.delete("/users/{user_id}/workout-logs/{log_id}", status_code=204, dependencies=[OwnerOnly])
+def delete_workout_log(user_id: int, log_id: int, session: SessionDep):
+    log = session.get(WorkoutLog, log_id)
+    if not log or log.user_id != user_id:
+        raise HTTPException(status_code=404, detail="Workout log not found")
+    session.delete(log)
+    session.commit()
+
+
+# ---------- Energy balance and progress toward the goal ----------
+
+def _ledger_days(session: Session, user_id: int, start: date, end: date) -> dict:
+    """{day: {"eaten": kcal or None, "exercise": kcal}} for start..end inclusive. eaten is None on
+    a day with no food logged (unknown, not zero)."""
+    days = {}
+    rows = session.exec(
+        select(FoodLog, MenuItem).join(MenuItem, MenuItem.id == FoodLog.item_id)
+        .where(FoodLog.user_id == user_id, FoodLog.date >= start, FoodLog.date <= end)
+    ).all()
+    for log, item in rows:
+        d = days.setdefault(log.date, {"eaten": 0.0, "exercise": 0.0})
+        d["eaten"] += item_nutrients(item, log.servings)["kcal"]
+    for w in session.exec(select(WorkoutLog).where(WorkoutLog.user_id == user_id, WorkoutLog.date >= start,
+                                                   WorkoutLog.date <= end)).all():
+        days.setdefault(w.date, {"eaten": None, "exercise": 0.0})["exercise"] += w.kcal
+    return days
+
+
+def _energy_context(session: Session, user_id: int, today: date):
+    """The user, their goal, the logged days, their weigh-ins and the calibrated daily burn."""
+    user = _user_or_404(session, user_id)
+    goal = session.get(Goal, user_id)
+    if not goal or not goal.calorie_goal:
+        raise HTTPException(status_code=404, detail="No goal set for this user; call PUT /users/{id}/goal first")
+    missing = missing_profile_fields(user)
+    if missing:
+        raise HTTPException(status_code=422, detail=f"profile is missing: {', '.join(missing)}")
+    start = min(goal.start_date or today, today - timedelta(days=energy.CALIBRATION_WINDOW))
+    days = _ledger_days(session, user_id, start, today)
+    weights = session.exec(select(WeightLog).where(WeightLog.user_id == user_id).order_by(WeightLog.date, WeightLog.id)).all()
+    formula = tdee(user, today)
+    calibration = energy.calibrate(days, [w for w in weights if w.date <= today], formula, today)
+    return user, goal, days, weights, formula * calibration["factor"], calibration
+
+
+@app.get("/users/{user_id}/energy", dependencies=[OwnerOnly])
+def read_energy(user_id: int, date: date, session: SessionDep):
+    """
+    One day's calories in and out: eaten, the daily burn (adjusted to the user's weigh-ins once there
+    is enough data), workouts, the net, and how the day compares with the plan (status "ahead",
+    "on_track", "behind", or "over"/"under" for maintain; "not_logged" with no food logged).
+    """
+    user, goal, days, _, burn, calibration = _energy_context(session, user_id, date)
+    d = days.get(date, {"eaten": None, "exercise": 0.0})
+    workouts = session.exec(select(WorkoutLog).where(WorkoutLog.user_id == user_id, WorkoutLog.date == date)
+                            .order_by(WorkoutLog.id)).all()
+    return {
+        "date": date,
+        "goal_type": goal.goal_type,
+        "calorie_goal": goal.calorie_goal,
+        **energy.day_balance(goal.goal_type, goal.calorie_goal, burn, d["eaten"], d["exercise"]),
+        "workouts": [WorkoutLogPublic.model_validate(w) for w in workouts],
+        "burn_adjusted": calibration["factor"] != 1.0,
+    }
+
+
+@app.get("/users/{user_id}/goal/progress", dependencies=[OwnerOnly])
+def read_goal_progress(user_id: int, session: SessionDep, date: date | None = None):
+    """
+    How the logged days add up: kcal (and lb) ahead of or behind the plan, and for a timeline goal
+    how many days earlier or later it should finish. Also the weight the logs suggest today (the
+    latest smoothed weigh-in plus calories since), the scale-based status from the timeline, and
+    how the daily burn has been adjusted to the user's weigh-ins.
+    """
+    today = date or _today()
+    user, goal, days, weights, burn, calibration = _energy_context(session, user_id, today)
+    progress = energy.goal_progress(goal, days, burn, today)
+    weights_so_far = [w for w in weights if w.date <= today]
+    estimate = energy.estimate_weight(weights_so_far, days, burn, goal.start_weight_lbs or user.weight_lbs,
+                                      goal.start_date or today, today)
+    scale = None
+    if goal.target_date:
+        t = timeline(goal, weights_so_far, today)
+        scale = {k: t[k] for k in ("status", "latest_weight_lbs", "expected_weight_lbs", "remaining_lbs",
+                                   "projected_finish_date")}
+    return {
+        "goal_type": goal.goal_type,
+        "target_date": goal.target_date,
+        **progress,
+        "message": energy.progress_message(progress, goal.goal_type),
+        "weight": estimate,
+        "scale": scale,
+        "calibration": calibration,
+    }
+
+
+# ---------- Campus fitness events ----------
+
+@app.get("/events")
+def list_events(start: date | None = None, days: int = 7, fitness_only: bool = True, q: str | None = None):
+    """
+    Upcoming events from the campus "Recreation, Health & Wellness" calendar: by default the
+    exercise ones (skating, classes, runs, ...) in the next 7 days. fitness_only=false includes
+    wellness events too; q searches the title, place and description.
+    """
+    if not 1 <= days <= 31:
+        raise HTTPException(status_code=422, detail="days must be between 1 and 31")
+    try:
+        all_events = events.fetch_events()
+    except requests.RequestException:
+        raise HTTPException(status_code=503, detail="Couldn't reach the campus calendar; try again in a minute")
+    start = start or _today()
+    found = events.upcoming(all_events, start, days, fitness_only, q)
+    return {"start": start, "days": days, "source": events.CALENDAR_PAGE, "events": found}

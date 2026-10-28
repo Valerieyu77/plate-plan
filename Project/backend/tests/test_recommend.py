@@ -151,14 +151,19 @@ def test_workout_focus_follows_the_goal(goal, focus):
     assert recommend_workout(goal, 2000, 2000)["focus"] == focus
 
 
-def test_workout_intensity_follows_calories_eaten():
+def test_eating_more_never_makes_the_workout_harder_it_only_adds_a_note():
     over = recommend_workout("lose", 2000, 2000 + SURPLUS_KCAL + 1)
     under = recommend_workout("lose", 2000, 2000 - SURPLUS_KCAL - 1)
     even = recommend_workout("lose", 2000, 2000 + SURPLUS_KCAL)
-    assert over["intensity"] == "hard" and over["note"]
-    assert under["intensity"] == "light" and under["note"]
-    assert even["intensity"] == "moderate" and even["note"] is None
-    assert under["minutes"] < even["minutes"] < over["minutes"]
+    assert over["intensity"] == under["intensity"] == even["intensity"] == "moderate"
+    assert over["note"] and "don't need to burn it off" in over["note"]
+    assert under["note"] and even["note"] is None
+
+
+def test_the_user_picks_the_intensity_and_harder_means_longer_by_default():
+    light, hard = (recommend_workout("lose", 2000, 2000, intensity=i) for i in ("light", "hard"))
+    assert light["intensity"] == "light" and hard["intensity"] == "hard"
+    assert light["minutes"] < hard["minutes"]
 
 
 def test_workout_unknown_goal_falls_back_to_mixed():
