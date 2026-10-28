@@ -20,6 +20,8 @@ const isSmall = (item) => item.kcal != null && item.kcal < SMALL_KCAL
 // Servings move in half steps
 const SERVING_STEP = 0.5
 const MAX_SERVINGS = 5
+// Typing allows any amount up to this, in hundredths (e.g. 0.25 of a pizza, 8 cookies)
+const MAX_TYPED_SERVINGS = 20
 
 // The meal that fits the time of day: breakfast, lunch or dinner
 function defaultGroup() {
@@ -443,9 +445,26 @@ function DishRow({ item, servings, busy, onServings }) {
   )
 }
 
-// − 1.5 + : at the lowest step, − removes the dish
+// − 1.5 + : at the lowest step, − removes the dish. The number can also be typed: Enter or leaving the field
+// saves it, Escape puts it back, and 0 removes the dish.
 function ServingStepper({ name, servings, busy, onChange }) {
   const btn = 'grid h-7 w-7 place-items-center rounded-full text-lg leading-none font-semibold transition-colors disabled:opacity-40'
+  const [draft, setDraft] = useState(null) // what is being typed; null when not editing
+  const [invalid, setInvalid] = useState(false)
+
+  const commit = () => {
+    if (draft === null) return
+    const n = Math.round(Number(draft) * 100) / 100
+    if (draft.trim() === '' || !Number.isFinite(n) || n < 0 || n > MAX_TYPED_SERVINGS) {
+      setInvalid(true)
+      setDraft(null)
+      return
+    }
+    setDraft(null)
+    setInvalid(false)
+    if (n !== servings) onChange(n)
+  }
+
   return (
     <div className="flex shrink-0 items-center gap-1 rounded-full bg-brand-soft p-0.5" role="group" aria-label={`Servings of ${name}`}>
       <button
@@ -457,9 +476,34 @@ function ServingStepper({ name, servings, busy, onChange }) {
       >
         −
       </button>
-      <span className="min-w-8 text-center text-sm font-bold text-brand-deep" aria-live="polite">
-        {servings}×
-      </span>
+      <label className="flex items-center text-sm font-bold text-brand-deep" title={invalid ? `Enter 0 to ${MAX_TYPED_SERVINGS}` : 'Type an amount'}>
+        <input
+          type="text"
+          inputMode="decimal"
+          value={draft ?? String(servings)}
+          disabled={busy}
+          onFocus={(e) => {
+            setDraft(String(servings))
+            setInvalid(false)
+            e.target.select()
+          }}
+          onChange={(e) => {
+            if (/^\d*\.?\d*$/.test(e.target.value)) setDraft(e.target.value)
+          }}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') e.currentTarget.blur()
+            else if (e.key === 'Escape') {
+              setDraft(null)
+              e.currentTarget.blur()
+            }
+          }}
+          aria-label={`Servings of ${name}`}
+          aria-invalid={invalid || undefined}
+          className={`w-9 rounded-md bg-transparent text-right outline-none focus:bg-surface focus:ring-2 ${invalid ? 'ring-2 ring-bad/50' : 'focus:ring-brand/30'}`}
+        />
+        <span aria-hidden="true">×</span>
+      </label>
       <button
         type="button"
         disabled={busy || servings >= MAX_SERVINGS}
