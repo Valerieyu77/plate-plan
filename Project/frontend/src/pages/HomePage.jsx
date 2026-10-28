@@ -95,13 +95,14 @@ export default function HomePage({ user, onNavigate }) {
 }
 
 function TodayCard({ progress }) {
-  const { target, actual, remaining } = progress
+  const { target, actual, remaining, over } = progress
+  const isOver = over.kcal > 0
   return (
     <Card>
       <div className="flex items-center gap-5">
         <ProgressRing value={actual.kcal} max={target.kcal} size={120} stroke={11} label={`${fmt(actual.kcal)} of ${fmt(target.kcal)} kcal eaten today`}>
-          <p className="text-2xl leading-none font-bold">{fmt(remaining.kcal)}</p>
-          <p className="mt-1 text-[11px] font-medium text-muted">kcal left</p>
+          <p className={`text-2xl leading-none font-bold ${isOver ? 'text-bad' : ''}`}>{fmt(isOver ? over.kcal : remaining.kcal)}</p>
+          <p className="mt-1 text-[11px] font-medium text-muted">{isOver ? 'kcal over' : 'kcal left'}</p>
         </ProgressRing>
         <div className="min-w-0 flex-1 space-y-2.5">
           <p className="text-[13px] font-semibold text-muted">
