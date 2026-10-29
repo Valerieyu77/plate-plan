@@ -29,6 +29,10 @@ Status: ✅ built and merged, 🟡 build with mock data first, ⬜ not started.
 | Check off / un-check what was eaten | `POST` ✅ and `DELETE /users/{id}/food-logs` ✅ |
 | Log weight | `POST /users/{id}/weight-logs` ✅ |
 | Progress page: target vs actual, weight trend, plan vs actual weight | `GET /users/{id}/progress` ✅, `GET /users/{id}/goal/timeline` ✅ |
+| Get a workout (pick muscles, length, intensity, or nothing at all) | `GET /users/{id}/workout` ✅, `GET /exercises` ✅ |
+| Log a workout (optional) | `POST`, `GET`, `DELETE /users/{id}/workout-logs` ✅ |
+| Calories in vs out today; ahead or behind the plan, finishing early or late | `GET /users/{id}/energy` ✅, `GET /users/{id}/goal/progress` ✅ |
+| Campus fitness events | `GET /events` ✅ |
 
 Everything marked ✅ is in PR #9 (or already merged) and has tests.
 
@@ -243,9 +247,81 @@ Target vs actual for a day, plus the weight history for the trend chart. `404` i
 ```
 `actual` = sum of (`servings` x per-serving nutrient) over that day's food logs. `remaining` never goes below 0; going over shows up in `over`.
 
+### `GET /exercises?kind=&muscle=&equipment=` ✅
+The exercise list (`app/exercises.py`, about 30 moves). Each:
+```json
+{ "id": "goblet-squat", "name": "Goblet squat", "kind": "strength", "muscles": ["legs", "glutes"],
+  "equipment": "Dumbbells", "met": { "light": 3.5, "moderate": 5.0, "hard": 6.0 },
+  "how_to": ["Hold one dumbbell upright against your chest...", "..."], "tip": "Keep your heels on the floor...",
+  "video_url": "https://www.youtube.com/results?search_query=how+to+do+Goblet+squat+proper+form" }
+```
+`kind` is `cardio`, `strength` or `mobility`; muscle groups are `legs, glutes, chest, back, shoulders, arms, core, heart`. `how_to` and `video_url` are `null` for machines that explain themselves (treadmill, bike, elliptical, stair climber, track, pool). The video link is a YouTube search, so it never goes stale. No gym is named: the plan says what equipment to use, and the user finds it at whichever gym they go to.
+
+### `GET /users/{id}/workout?date=&intensity=&minutes=&focus=&muscles=&no_equipment=&avoid=` ✅
+A workout for the day. Every parameter is optional. Working out is the user's choice: they pick `intensity` (`light`, `moderate` default, `hard`), `minutes` (10-120; default 20 / 35 / 50 by intensity), `muscles` (comma-separated groups), `focus` (`cardio`, `strength`, `mixed`) and `no_equipment=true`. With nothing chosen, the goal sets the focus (lose: cardio, maintain: mixed, gain: strength). Picking only muscles means strength on those groups (`muscles=heart` means cardio). `avoid` (comma-separated exercise ids) is "show me another". The same day gives the same plan.
+```json
+{
+  "date": "2026-10-28", "focus": "strength", "intensity": "moderate", "minutes": 32, "total_kcal": 147,
+  "exercises": [
+    { "id": "elliptical", "name": "Elliptical", "kind": "cardio", "muscles": ["heart"], "equipment": "Elliptical",
+      "sets": null, "reps": null, "minutes": 5, "kcal": 17, "how_to": null, "tip": "...", "video_url": null },
+    { "id": "step-up", "name": "Step-up", "kind": "strength", "muscles": ["legs", "glutes"], "equipment": "Bench or box",
+      "sets": 3, "reps": "10", "minutes": 4.5, "kcal": 24, "how_to": ["..."], "tip": "...", "video_url": "https://www.youtube.com/results?..." },
+    { "id": "stretch", "name": "Full-body stretch", "kind": "mobility", "minutes": 5, "...": "..." }
+  ],
+  "note": null
+}
+```
+A plan is a 5-minute warm-up (strength and mixed), the main block, and a 5-minute stretch (25 minutes or more). Strength goes round the muscle groups one move each (at most 8 moves; a long session adds sets, then a short cardio finisher). `kcal` = MET x weight (kg) x hours, an estimate; `null` without a weight on the profile. What was eaten never makes the workout harder; it only sets `note` (e.g. "Eat something first, especially before a hard session"). `422` for an unknown choice.
+
+### `POST /users/{id}/workout-logs` ✅
+```json
+{ "exercise_id": "treadmill", "minutes": 30, "intensity": "moderate", "date": "2026-10-28" }
+```
+or, for anything not in the list, `{ "name": "Badminton", "minutes": 45, "kcal": 250 }`. `kcal` is worked out from the exercise's MET, the user's weight and the minutes unless sent (e.g. from a watch). `date` defaults to today. Returns `201` with `{ "id", "user_id", "date", "exercise_id", "name", "minutes", "intensity", "kcal" }`; `422` for an unknown `exercise_id`, or a custom one without `kcal`.
+
+### `GET /users/{id}/workout-logs?date=` ✅ / `DELETE /users/{id}/workout-logs/{log_id}` ✅
+The list (all days, or one), oldest first. Delete returns `204`.
+
+### `GET /users/{id}/energy?date=` ✅
+One day's calories in and out. `404` without a goal, `422` if the profile is missing weight, height, sex or birthdate.
+```json
+{
+  "date": "2026-10-28", "goal_type": "lose", "calorie_goal": 1650,
+  "eaten": 1500, "base_burn": 2100, "exercise": 190, "burned": 2290, "net": -790,
+  "planned_net": -450, "vs_plan": 340, "status": "ahead",
+  "workouts": [ { "id": 1, "name": "Treadmill walk or run", "minutes": 30, "kcal": 190, "...": "..." } ],
+  "burn_adjusted": false
+}
+```
+`net` = eaten - burned (negative is a deficit). `vs_plan` is how far the day was from the plan in the goal's direction (positive is ahead: a bigger deficit when losing, a bigger surplus when gaining); it is simply eaten - workouts - calorie goal, so it doesn't depend on the burn estimate. `status`: `ahead`, `on_track` (within 100 kcal), `behind`; for maintain `on_track`, `over`, `under`; `not_logged` (and `eaten: null`) when no food was logged that day; `too_low` for a past day eaten under the safe calorie minimum (today isn't over, so it never shows for today). `burn_adjusted` says whether `base_burn` has been corrected from the user's weigh-ins (see below).
+
+### `GET /users/{id}/goal/progress?date=` ✅
+How the logged days add up, from the goal's start (or the last 4 weeks without a timeline) to yesterday. Days without food logs don't count. For a timeline goal the count restarts at the latest weigh-in (`since`, with `since_weigh_in: true`): each weigh-in replans the calories for what is left, which already makes up for the days before it.
+```json
+{
+  "goal_type": "lose", "target_date": "2026-12-20", "since": "2026-10-20", "days": 8, "days_logged": 6,
+  "since_weigh_in": false, "ahead_kcal": 1750, "ahead_lbs": 0.5, "status": "ahead", "warning": null, "days_earlier": 3, "projected_finish_date": "2026-12-17",
+  "message": "You are 1750 kcal ahead of plan over 6 logged days, about 0.5 lb. At this rate you finish about 3 days early.",
+  "weight": { "from_weight_lbs": 158.6, "from_date": "2026-10-26", "estimated_weight_lbs": 158.1 },
+  "scale": { "status": "on_track", "latest_weight_lbs": 158.4, "expected_weight_lbs": 158.9, "remaining_lbs": 18.4, "projected_finish_date": "2026-12-22" },
+  "calibration": { "factor": 0.94, "burn_estimate": 1975, "days_used": 21, "message": "From your weigh-ins and logs over 21 days, you seem to burn about 1975 kcal a day, 125 less than the formula. The estimates below use that." }
+}
+```
+How the logs and the scale fit together (`app/energy.py`): the logs give the day-to-day picture and the scale corrects it. `weight` is the latest smoothed weigh-in (the average of the readings in the week before it) plus the calories logged since. Once there are two weeks between weigh-ins with food logged on most days, the weight really lost or gained shows how much this person burns; `calibration.factor` (0.8-1.2, pulled toward 1 with little data) then scales the daily burn in these estimates (the calorie goal itself still comes from the formula). `scale` is the weigh-in-based status from `GET .../goal/timeline` (`null` without a timeline). `days_earlier` and `projected_finish_date` (from the logs) only for a timeline goal. `status` is `unsafe_pace` (with a `warning`, used as the `message`, and no finish date) when the logged days average under the safe calorie minimum, or point to losing or gaining faster than the safe pace from the goal timeline rules; going faster is only "ahead" while it is safe. Rough estimates (about 3,500 kcal per lb), not medical advice.
+
+### `GET /events?start=&days=&fitness_only=&q=` ✅
+Upcoming events from the campus [Recreation, Health & Wellness calendar](https://calendars.illinois.edu/list/637) (read as iCal, cached for an hour). By default the exercise ones (skating, classes, runs, ...) in the next 7 days; `fitness_only=false` adds the other wellness events; `q` searches the title, place and description; `days` 1-31. No login needed.
+```json
+{ "start": "2026-10-28", "days": 7, "source": "https://calendars.illinois.edu/list/637",
+  "events": [ { "title": "Lunch Skate", "start": "2026-10-28T11:15:00", "end": "2026-10-28T12:30:00", "all_day": false,
+                "location": "Ice Arena 406 E. Armory Ave. Champaign, IL 61820", "description": "...", "url": "https://calendars.illinois.edu/detail/637/..." } ] }
+```
+`503` if the campus calendar can't be reached and nothing is cached. Student club (RSO) events aren't included: they are in a system that needs a login.
+
 ## Who builds what
 - **C:** every endpoint above, deployment (Render, `DATABASE_URL` env var).
 - **B:** owns `app/nutrition.py` (a working baseline is in PR #9): daily targets, per-meal split, cross-meal adjustment, progress. Timelines and their safety limits are in `app/timeline.py`. Still open for B: tuning the meal weights.
 - **D:** `recommend(target, items) -> {items, total, note}` as a plain function; C calls it.
-- **A:** menu data (`menuitem` table, kept fresh), `GET /halls`, `GET /menu-items`, end-to-end tests.
+- **A:** menu data (`menuitem` table, kept fresh), `GET /halls`, `GET /menu-items`, end-to-end tests; workouts (`app/exercises.py`, `app/workout.py`, on top of D's `recommend_workout()` template), workout logs, the energy balance and weigh-in calibration (`app/energy.py`), campus events (`app/events.py`).
 - **Frontend:** build against this document with mock data, switch the base URL when the backend is ready.

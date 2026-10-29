@@ -193,6 +193,50 @@ class FoodLogPublic(SQLModel):
     item_id: int | None
 
 
+# ---------- Workout log ----------
+
+class WorkoutLog(SQLModel, table=True):
+    """One exercise the user did. kcal is worked out when it is logged (MET x weight x time), so a
+    later change of weight doesn't rewrite old days."""
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    date: date
+    exercise_id: str | None = None  # an id from app/exercises.py; None for something not in the list
+    name: str
+    minutes: float
+    intensity: str = "moderate"
+    kcal: float
+
+
+class WorkoutLogCreate(SQLModel):
+    """Log an exercise from the list (exercise_id), or anything else by name with your own kcal."""
+    exercise_id: str | None = None
+    name: str | None = None
+    minutes: float = Field(gt=0, le=600)
+    intensity: str = "moderate"
+    kcal: float | None = Field(default=None, ge=0)  # required for an exercise not in the list
+    date: Date | None = None  # defaults to today
+
+    @model_validator(mode="after")
+    def _known_exercise_or_own_numbers(self):
+        if self.intensity not in ("light", "moderate", "hard"):
+            raise ValueError("intensity must be light, moderate or hard")
+        if self.exercise_id is None and (not self.name or self.kcal is None):
+            raise ValueError("send exercise_id, or a name and kcal for an exercise not in the list")
+        return self
+
+
+class WorkoutLogPublic(SQLModel):
+    id: int
+    user_id: int
+    date: Date
+    exercise_id: str | None
+    name: str
+    minutes: float
+    intensity: str
+    kcal: float
+
+
 # ---------- Menu item (written by the scraper, read by everyone else) ----------
 
 class MenuItem(SQLModel, table=True):

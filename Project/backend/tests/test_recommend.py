@@ -1,5 +1,5 @@
 """
-Checks for recommend().
+Checks for recommend() and recommend_workout().
 Run:  python -m pytest tests/test_recommend.py
 """
 import json
@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from app.recommend import NUTRIENTS, recommend
+from app.recommend import NUTRIENTS, SURPLUS_KCAL, recommend, recommend_workout
 
 TARGET = {"kcal": 600, "protein_g": 40, "carbs_g": 60, "fat_g": 20}
 MENU = [
@@ -136,3 +136,35 @@ def test_real_menus_give_plates_that_look_like_meals_and_hit_the_target():
         close += all(abs(total[k] - target[k]) <= 0.15 * target[k] for k in NUTRIENTS)
     assert close >= 0.8 * len(big)  # most plates land within 15% on every nutrient
     assert (time.time() - start) / len(big) < 0.5  # seconds per menu
+
+
+# ---------- recommend_workout() ----------
+
+def test_workout_has_the_agreed_shape():
+    w = recommend_workout("maintain", 2000, 2000)
+    assert set(w) >= {"focus", "intensity", "minutes", "exercises", "note"}
+    assert isinstance(w["exercises"], list)
+
+
+@pytest.mark.parametrize("goal, focus", [("lose", "cardio"), ("maintain", "mixed"), ("gain", "strength")])
+def test_workout_focus_follows_the_goal(goal, focus):
+    assert recommend_workout(goal, 2000, 2000)["focus"] == focus
+
+
+def test_eating_more_never_makes_the_workout_harder_it_only_adds_a_note():
+    over = recommend_workout("lose", 2000, 2000 + SURPLUS_KCAL + 1)
+    under = recommend_workout("lose", 2000, 2000 - SURPLUS_KCAL - 1)
+    even = recommend_workout("lose", 2000, 2000 + SURPLUS_KCAL)
+    assert over["intensity"] == under["intensity"] == even["intensity"] == "moderate"
+    assert over["note"] and "don't need to burn it off" in over["note"]
+    assert under["note"] and even["note"] is None
+
+
+def test_the_user_picks_the_intensity_and_harder_means_longer_by_default():
+    light, hard = (recommend_workout("lose", 2000, 2000, intensity=i) for i in ("light", "hard"))
+    assert light["intensity"] == "light" and hard["intensity"] == "hard"
+    assert light["minutes"] < hard["minutes"]
+
+
+def test_workout_unknown_goal_falls_back_to_mixed():
+    assert recommend_workout("bulk", 2000, 2000)["focus"] == "mixed"

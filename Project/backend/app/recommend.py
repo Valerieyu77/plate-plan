@@ -187,6 +187,52 @@ def recommend(target: dict, items: list[dict], max_servings: float = 3.0, avoid_
     return _result(lines, target)
 
 
+WORKOUT_FOCUS = {"lose": "cardio", "maintain": "mixed", "gain": "strength"}
+WORKOUT_MINUTES = {"light": 20, "moderate": 35, "hard": 50}
+SURPLUS_KCAL = 200  # this far over or under the calorie goal gets a note
+
+
+def recommend_workout(goal_type: str, calorie_goal: float, kcal_eaten: float, intensity: str | None = None,
+                      minutes: int | None = None, focus: str | None = None, muscles: list[str] | None = None,
+                      weight_lbs: float | None = None, no_equipment: bool = False, avoid=(), seed: str = "") -> dict:
+    """
+    Suggest a workout for today. Working out is the user's choice, so they pick the intensity
+    (default moderate), and may pick the length, the focus, the muscle groups and "no equipment".
+    The goal only sets the default focus. What was eaten never makes the workout harder: exercise
+    is not a punishment for eating. It only changes the note.
+
+    goal_type: "lose", "maintain" or "gain" (see GOAL_TYPES in models.py)
+    calorie_goal: the user's daily calorie goal
+    kcal_eaten: calories eaten today
+
+    Returns {"focus", "intensity", "minutes", "exercises", "total_kcal", "note"}; the exercises come
+    from app/workout.py (each with equipment, sets/reps or minutes, how-to steps and a video link).
+    Raises ValueError for an unknown focus, intensity or muscle group, or a length out of range.
+    """
+    from .workout import build_plan  # imported here so recommend() keeps working even if workout.py breaks
+
+    intensity = intensity or "moderate"
+    if not focus:
+        # Picking only muscle groups means strength work on them; only "heart" means cardio
+        if muscles:
+            focus = "cardio" if set(muscles) == {"heart"} else "strength"
+        else:
+            focus = WORKOUT_FOCUS.get(goal_type, "mixed")
+
+    balance = kcal_eaten - calorie_goal  # > 0 means over the goal
+    if balance > SURPLUS_KCAL:
+        note = f"You have eaten {balance:.0f} kcal more than your goal today. A workout helps, but you don't need to burn it off."
+    elif balance < -SURPLUS_KCAL and kcal_eaten > 0:
+        # Training hard on an empty tank is a bad idea, and someone trying to gain needs those calories
+        note = f"You are {-balance:.0f} kcal under your goal so far. Eat something first, especially before a hard session."
+    else:
+        note = None
+
+    plan = build_plan(focus, intensity, minutes or WORKOUT_MINUTES.get(intensity), weight_lbs, muscles,
+                      no_equipment, avoid, seed)
+    return {**plan, "note": note}
+
+
 def _result(lines: list[dict], target: dict, note: str | None = None) -> dict:
     total = {k: round(sum(line[k] for line in lines), 1) for k in NUTRIENTS}
     if note is None:
