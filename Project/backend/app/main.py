@@ -18,11 +18,11 @@ from .models import (
 )
 from .dietary import allowed_for_user
 from .recommend import recommend, recommend_workout
-from .timeline import plan_goal, replan, timeline
+from .timeline import max_safe_rate, plan_goal, replan, timeline
 from .picks import high_protein_target, match_score, protein_share
 from .nutrition import (
     GROUP_ORDER, MEAL_GROUP, MEAL_ORDER, NUTRIENTS, add_nutrients, daily_targets, day_progress, goal_to_targets,
-    item_nutrients, meal_target, meals_in_group, missing_profile_fields, tdee, zero_nutrients,
+    calorie_floor, item_nutrients, meal_target, meals_in_group, missing_profile_fields, tdee, zero_nutrients,
 )
 from . import energy, events
 from .exercises import BY_ID as EXERCISES_BY_ID, EXERCISES, MUSCLES, kcal_burned, video_url
@@ -662,7 +662,8 @@ def read_energy(user_id: int, date: date, session: SessionDep):
     """
     One day's calories in and out: eaten, the daily burn (adjusted to the user's weigh-ins once there
     is enough data), workouts, the net, and how the day compares with the plan (status "ahead",
-    "on_track", "behind", or "over"/"under" for maintain; "not_logged" with no food logged).
+    "on_track", "behind", or "over"/"under" for maintain; "not_logged" with no food logged;
+    "too_low" for a past day under the safe calorie minimum).
     """
     user, goal, days, _, burn, calibration = _energy_context(session, user_id, date)
     d = days.get(date, {"eaten": None, "exercise": 0.0})
@@ -672,7 +673,9 @@ def read_energy(user_id: int, date: date, session: SessionDep):
         "date": date,
         "goal_type": goal.goal_type,
         "calorie_goal": goal.calorie_goal,
-        **energy.day_balance(goal.goal_type, goal.calorie_goal, burn, d["eaten"], d["exercise"]),
+        # Today isn't over, so only a past day can count as under the minimum
+        **energy.day_balance(goal.goal_type, goal.calorie_goal, burn, d["eaten"], d["exercise"],
+                             calorie_floor(user) if date < _today() else None),
         "workouts": [WorkoutLogPublic.model_validate(w) for w in workouts],
         "burn_adjusted": calibration["factor"] != 1.0,
     }
@@ -684,12 +687,14 @@ def read_goal_progress(user_id: int, session: SessionDep, date: date | None = No
     How the logged days add up: kcal (and lb) ahead of or behind the plan, and for a timeline goal
     how many days earlier or later it should finish. Also the weight the logs suggest today (the
     latest smoothed weigh-in plus calories since), the scale-based status from the timeline, and
-    how the daily burn has been adjusted to the user's weigh-ins.
+    how the daily burn has been adjusted to the user's weigh-ins. For a timeline goal the logs count
+    from the latest weigh-in, which replanned the calories; a pace that isn't safe is "unsafe_pace".
     """
     today = date or _today()
     user, goal, days, weights, burn, calibration = _energy_context(session, user_id, today)
-    progress = energy.goal_progress(goal, days, burn, today)
     weights_so_far = [w for w in weights if w.date <= today]
+    max_rate = max_safe_rate(user, goal.goal_type, today) if goal.goal_type in ("lose", "gain") else None
+    progress = energy.goal_progress(goal, days, burn, today, weights_so_far, calorie_floor(user), max_rate)
     estimate = energy.estimate_weight(weights_so_far, days, burn, goal.start_weight_lbs or user.weight_lbs,
                                       goal.start_date or today, today)
     scale = None

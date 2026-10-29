@@ -100,7 +100,7 @@ def test_energy_for_a_day_counts_food_and_workouts(client):
     assert e["eaten"] == 600 and e["exercise"] == pytest.approx(walk, abs=1)
     assert e["burned"] == pytest.approx(e["base_burn"] + walk, abs=1) and e["net"] == pytest.approx(600 - e["burned"], abs=1)
     assert e["calorie_goal"] == calorie_goal
-    assert e["vs_plan"] == pytest.approx(-(600 - walk - calorie_goal), abs=1) and e["status"] == "ahead"  # ate far less than planned
+    assert e["vs_plan"] == pytest.approx(-(600 - walk - calorie_goal), abs=1) and e["status"] == "too_low"  # 600 kcal is under the safe minimum
     assert len(e["workouts"]) == 1 and e["burn_adjusted"] is False
 
     empty = client.get(f"/users/{uid}/energy?date=2026-10-09").json()
@@ -123,15 +123,40 @@ def test_goal_progress_for_a_timeline_goal(client):
     assert p["weight"]["from_weight_lbs"] == 140 and p["scale"]["status"] == "on_track"
     assert p["calibration"]["factor"] == 1.0
 
-    # Two light days logged after the start: well ahead, so it should finish early
+    # Two days 300 kcal under the plan (still a safe pace): ahead, so it should finish early
+    light = round((goal["calorie_goal"] - 300) / 300, 2)  # item 1 is 300 kcal a serving
     for d in (TODAY, TODAY + timedelta(days=1)):
-        client.post(f"/users/{uid}/food-logs", json={"item_id": 1, "servings": 1, "date": str(d)})
+        client.post(f"/users/{uid}/food-logs", json={"item_id": 1, "servings": light, "date": str(d)})
     p = client.get(f"/users/{uid}/goal/progress?date={TODAY + timedelta(days=3)}").json()
     assert p["days_logged"] == 2 and p["status"] == "ahead" and p["days_earlier"] > 0
     assert p["projected_finish_date"] < goal["target_date"]
     assert p["weight"]["estimated_weight_lbs"] < 140 and "ahead of plan" in p["message"]
-    assert p["ahead_kcal"] == round(2 * (goal["calorie_goal"] - 300))
+    assert p["ahead_kcal"] == pytest.approx(2 * 300, abs=2)
     assert yesterday < TODAY  # (yesterday isn't logged and doesn't count)
+
+
+def test_a_weigh_in_restarts_the_count_so_following_the_plan_is_never_behind(client):
+    uid = with_goal(client, target_weight_lbs=132, target_date=str(TODAY + timedelta(days=84)))
+    plan = client.get(f"/users/{uid}/goal").json()["calorie_goal"]
+    for i in range(14):  # exactly the plan
+        client.post(f"/users/{uid}/food-logs", json={"item_id": 1, "servings": round(plan / 300, 2),
+                                                     "date": str(TODAY + timedelta(days=i))})
+    # Heavier on the scale: the weigh-in replans to fewer calories, which must not rescore the 14 days
+    client.post(f"/users/{uid}/weight-logs", json={"weight_lbs": 143, "date": str(TODAY + timedelta(days=14))})
+    assert client.get(f"/users/{uid}/goal").json()["calorie_goal"] < plan
+    p = client.get(f"/users/{uid}/goal/progress?date={TODAY + timedelta(days=14)}").json()
+    assert p["since"] == str(TODAY + timedelta(days=14)) and p["since_weigh_in"] is True
+    assert p["days_logged"] == 0 and p["status"] == "not_logged" and "weigh-in updated your plan" in p["message"]
+    assert p["scale"]["status"] == "behind"  # the scale still says so
+
+
+def test_eating_under_the_minimum_is_flagged_not_praised(client):
+    uid = with_goal(client, target_weight_lbs=132, target_date=str(TODAY + timedelta(days=84)))
+    for i in range(7):  # 600 kcal a day
+        client.post(f"/users/{uid}/food-logs", json={"item_id": 1, "servings": 2, "date": str(TODAY + timedelta(days=i))})
+    p = client.get(f"/users/{uid}/goal/progress?date={TODAY + timedelta(days=7)}").json()
+    assert p["status"] == "unsafe_pace" and p["days_earlier"] is None and p["projected_finish_date"] is None
+    assert "safe minimum" in p["message"] and "early" not in p["message"]
 
 
 def test_goal_progress_without_a_timeline_looks_at_the_last_four_weeks(client):

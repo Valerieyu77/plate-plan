@@ -18,7 +18,12 @@ So the logs give the day-to-day picture and the scale corrects it:
 
 Whether the user is ahead of or behind the plan doesn't depend on the burn estimate at all: the
 plan already allows for it, so a day's difference from the plan is just
-eaten - workouts - calorie goal (the daily burn cancels out).
+eaten - workouts - calorie goal (the daily burn cancels out). For a timeline goal, each weigh-in
+replans the calorie goal (timeline.replan()), which already makes up for everything before it, so
+only the days since the latest weigh-in are added up.
+
+Going faster than planned is only "ahead" while it stays safe: eating under the calorie minimum, or
+a real pace beyond the safe maximum (timeline.max_safe_rate()), is flagged instead of praised.
 
 About 3,500 kcal per lb; workouts are estimates too, and if the activity level picked at sign-up
 already counts regular exercise, logging it adds some of it twice. Rough guidance, not medical advice.
@@ -55,12 +60,14 @@ def _status(ahead_kcal_per_day: float, goal_type: str) -> str:
     return "on_track"
 
 
-def day_balance(goal_type: str, calorie_goal: float, base_burn: float, eaten: float | None, exercise: float) -> dict:
+def day_balance(goal_type: str, calorie_goal: float, base_burn: float, eaten: float | None, exercise: float,
+                calorie_floor: float | None = None) -> dict:
     """
     One day's ledger. `eaten` is None when nothing was logged (unknown, not zero).
     net < 0 is a deficit. vs_plan is how far the day was from the plan in the goal's direction:
     > 0 is ahead (a bigger deficit when losing, a bigger surplus when gaining). For "maintain",
     vs_plan is simply eaten - workouts - goal, and status says "over" or "under".
+    With calorie_floor (pass it only for a day that is over), eating under it is "too_low".
     """
     burned = base_burn + exercise
     planned_net = calorie_goal - base_burn
@@ -73,7 +80,7 @@ def day_balance(goal_type: str, calorie_goal: float, base_burn: float, eaten: fl
     return {
         "eaten": round(eaten), "base_burn": round(base_burn), "exercise": round(exercise), "burned": round(burned),
         "net": round(eaten - burned), "planned_net": round(planned_net), "vs_plan": round(vs_plan),
-        "status": _status(vs_plan, goal_type),
+        "status": "too_low" if calorie_floor and eaten < calorie_floor else _status(vs_plan, goal_type),
     }
 
 
@@ -151,36 +158,59 @@ def estimate_weight(weights: list, days: dict, base_burn: float, start_weight: f
     }
 
 
-def goal_progress(goal, days: dict, base_burn: float, today: date) -> dict:
+def goal_progress(goal, days: dict, base_burn: float, today: date, weights: list = (),
+                  calorie_floor: float | None = None, max_rate_lbs: float | None = None) -> dict:
     """
     How the logged days add up against the plan, from the goal's start (or the last 4 weeks for a
-    goal without a timeline) to yesterday. Only days with food logged count.
+    goal without a timeline) to yesterday. Only days with food logged count. For a timeline goal the
+    count restarts at the latest weigh-in (`weights`, sorted by date), since that replanned the calories.
     Returns totals, a status, and for a timeline goal how many days earlier or later it should finish.
+    status "unsafe_pace" (with a `warning`) when the logged days average under calorie_floor, or
+    change weight faster than max_rate_lbs a week; it then gives no finish date.
     """
     start = goal.start_date or today - timedelta(days=28)
+    since_weigh_in = False
+    if goal.target_date:
+        weigh_ins = [w.date for w in weights if start <= w.date <= today]
+        if weigh_ins:
+            start, since_weigh_in = weigh_ins[-1], True  # that day's food comes after the weigh-in
     sign = direction_sign(goal.goal_type)
-    logged, ahead = 0, 0.0
+    logged, ahead, eaten, net = 0, 0.0, 0.0, 0.0
     day = start
     while day < today:
         d = days.get(day)
         if d and d["eaten"] is not None:
             diff = d["eaten"] - d["exercise"] - goal.calorie_goal
             ahead += sign * diff if sign else diff
+            eaten += d["eaten"]
+            net += d["eaten"] - d["exercise"] - base_burn
             logged += 1
         day += timedelta(days=1)
     total_days = max(0, (today - start).days)
 
+    warning = None
+    if logged and calorie_floor and eaten / logged < calorie_floor:
+        warning = (f"You have averaged {eaten / logged:.0f} kcal a day, under the safe minimum of "
+                   f"{calorie_floor:.0f}. Eating more keeps you on a pace that lasts.")
+    elif logged and sign and max_rate_lbs is not None and sign * net / logged * 7 / KCAL_PER_LB > max_rate_lbs + 0.05:
+        pace = sign * net / logged * 7 / KCAL_PER_LB
+        verb = "losing" if sign < 0 else "gaining"
+        warning = (f"Your logs point to {verb} about {pace:.1f} lb a week, faster than the safe "
+                   f"{max_rate_lbs:.1f}. Sticking closer to your calorie goal is safer.")
+
     result = {
         "since": start,
+        "since_weigh_in": since_weigh_in,
         "days": total_days,
         "days_logged": logged,
         "ahead_kcal": round(ahead),
         "ahead_lbs": round(ahead / KCAL_PER_LB, 2),
-        "status": _status(ahead / logged, goal.goal_type) if logged else "not_logged",
+        "status": "unsafe_pace" if warning else _status(ahead / logged, goal.goal_type) if logged else "not_logged",
+        "warning": warning,
         "days_earlier": None,
         "projected_finish_date": None,
     }
-    if goal.target_date and goal.goal_type in ("lose", "gain"):
+    if goal.target_date and goal.goal_type in ("lose", "gain") and not warning:
         # The plan's daily change: from the planned pace, or what the calorie goal implies
         planned_daily = (goal.weekly_rate_lbs or 0) * KCAL_PER_LB / 7 or abs(goal.calorie_goal - base_burn)
         if planned_daily >= 50:
@@ -194,7 +224,11 @@ def progress_message(progress: dict, goal_type: str) -> str:
     """One friendly sentence for the progress card."""
     n, status = progress["days_logged"], progress["status"]
     logged = f"{n} logged day{'s' if n != 1 else ''}"
+    if status == "unsafe_pace":
+        return progress["warning"]
     if not n:
+        if progress.get("since_weigh_in"):
+            return "Your weigh-in updated your plan. Log what you eat to see how the next days add up."
         return "Log what you eat to see how your days add up toward your goal."
     kcal, lbs = abs(progress["ahead_kcal"]), abs(progress["ahead_lbs"])
     days = progress["days_earlier"]
@@ -205,6 +239,8 @@ def progress_message(progress: dict, goal_type: str) -> str:
         if status == "on_track":
             return f"Your {logged} {'are' if n != 1 else 'is'} close to your goal. Nice and steady."
         return f"Your {logged} come{'s' if n == 1 else ''} to {kcal} kcal {'over' if status == 'over' else 'under'} your goal (about {lbs:.1f} lb)."
+    if progress.get("since_weigh_in"):
+        logged += " since your weigh-in"
     if status == "ahead":
         return f"You are {kcal} kcal ahead of plan over {logged}, about {lbs:.1f} lb.{when}"
     if status == "behind":

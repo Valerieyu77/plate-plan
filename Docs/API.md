@@ -294,21 +294,21 @@ One day's calories in and out. `404` without a goal, `422` if the profile is mis
   "burn_adjusted": false
 }
 ```
-`net` = eaten - burned (negative is a deficit). `vs_plan` is how far the day was from the plan in the goal's direction (positive is ahead: a bigger deficit when losing, a bigger surplus when gaining); it is simply eaten - workouts - calorie goal, so it doesn't depend on the burn estimate. `status`: `ahead`, `on_track` (within 100 kcal), `behind`; for maintain `on_track`, `over`, `under`; `not_logged` (and `eaten: null`) when no food was logged that day. `burn_adjusted` says whether `base_burn` has been corrected from the user's weigh-ins (see below).
+`net` = eaten - burned (negative is a deficit). `vs_plan` is how far the day was from the plan in the goal's direction (positive is ahead: a bigger deficit when losing, a bigger surplus when gaining); it is simply eaten - workouts - calorie goal, so it doesn't depend on the burn estimate. `status`: `ahead`, `on_track` (within 100 kcal), `behind`; for maintain `on_track`, `over`, `under`; `not_logged` (and `eaten: null`) when no food was logged that day; `too_low` for a past day eaten under the safe calorie minimum (today isn't over, so it never shows for today). `burn_adjusted` says whether `base_burn` has been corrected from the user's weigh-ins (see below).
 
 ### `GET /users/{id}/goal/progress?date=` ✅
-How the logged days add up, from the goal's start (or the last 4 weeks without a timeline) to yesterday. Days without food logs don't count.
+How the logged days add up, from the goal's start (or the last 4 weeks without a timeline) to yesterday. Days without food logs don't count. For a timeline goal the count restarts at the latest weigh-in (`since`, with `since_weigh_in: true`): each weigh-in replans the calories for what is left, which already makes up for the days before it.
 ```json
 {
   "goal_type": "lose", "target_date": "2026-12-20", "since": "2026-10-20", "days": 8, "days_logged": 6,
-  "ahead_kcal": 1750, "ahead_lbs": 0.5, "status": "ahead", "days_earlier": 3, "projected_finish_date": "2026-12-17",
+  "since_weigh_in": false, "ahead_kcal": 1750, "ahead_lbs": 0.5, "status": "ahead", "warning": null, "days_earlier": 3, "projected_finish_date": "2026-12-17",
   "message": "You are 1750 kcal ahead of plan over 6 logged days, about 0.5 lb. At this rate you finish about 3 days early.",
   "weight": { "from_weight_lbs": 158.6, "from_date": "2026-10-26", "estimated_weight_lbs": 158.1 },
   "scale": { "status": "on_track", "latest_weight_lbs": 158.4, "expected_weight_lbs": 158.9, "remaining_lbs": 18.4, "projected_finish_date": "2026-12-22" },
   "calibration": { "factor": 0.94, "burn_estimate": 1975, "days_used": 21, "message": "From your weigh-ins and logs over 21 days, you seem to burn about 1975 kcal a day, 125 less than the formula. The estimates below use that." }
 }
 ```
-How the logs and the scale fit together (`app/energy.py`): the logs give the day-to-day picture and the scale corrects it. `weight` is the latest smoothed weigh-in (the average of the readings in the week before it) plus the calories logged since. Once there are two weeks between weigh-ins with food logged on most days, the weight really lost or gained shows how much this person burns; `calibration.factor` (0.8-1.2, pulled toward 1 with little data) then scales the daily burn everywhere. `scale` is the weigh-in-based status from `GET .../goal/timeline` (`null` without a timeline). `days_earlier` and `projected_finish_date` (from the logs) only for a timeline goal. Rough estimates (about 3,500 kcal per lb), not medical advice.
+How the logs and the scale fit together (`app/energy.py`): the logs give the day-to-day picture and the scale corrects it. `weight` is the latest smoothed weigh-in (the average of the readings in the week before it) plus the calories logged since. Once there are two weeks between weigh-ins with food logged on most days, the weight really lost or gained shows how much this person burns; `calibration.factor` (0.8-1.2, pulled toward 1 with little data) then scales the daily burn in these estimates (the calorie goal itself still comes from the formula). `scale` is the weigh-in-based status from `GET .../goal/timeline` (`null` without a timeline). `days_earlier` and `projected_finish_date` (from the logs) only for a timeline goal. `status` is `unsafe_pace` (with a `warning`, used as the `message`, and no finish date) when the logged days average under the safe calorie minimum, or point to losing or gaining faster than the safe pace from the goal timeline rules; going faster is only "ahead" while it is safe. Rough estimates (about 3,500 kcal per lb), not medical advice.
 
 ### `GET /events?start=&days=&fitness_only=&q=` ✅
 Upcoming events from the campus [Recreation, Health & Wellness calendar](https://calendars.illinois.edu/list/637) (read as iCal, cached for an hour). By default the exercise ones (skating, classes, runs, ...) in the next 7 days; `fitness_only=false` adds the other wellness events; `q` searches the title, place and description; `days` 1-31. No login needed.

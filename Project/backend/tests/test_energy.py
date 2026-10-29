@@ -84,6 +84,31 @@ def test_a_timeline_goal_finishes_earlier_when_ahead_and_later_when_behind():
     assert "3 days late" in progress_message(behind, "lose")
 
 
+def test_a_past_day_under_the_minimum_is_too_low():
+    assert day_balance("lose", 1500, BURN, 900, 0, calorie_floor=1200)["status"] == "too_low"
+    assert day_balance("lose", 1500, BURN, 1300, 0, calorie_floor=1200)["status"] == "ahead"
+
+
+def test_a_timeline_goal_counts_from_the_latest_weigh_in():
+    g = goal(target_date=TODAY + timedelta(days=60), weekly_rate_lbs=1.0)
+    p = goal_progress(g, logged(10, 1800), BURN, TODAY, weights=[w(TODAY - timedelta(days=3), 159)])
+    assert p["since"] == TODAY - timedelta(days=3) and p["days_logged"] == 3 and p["since_weigh_in"]
+    assert "since your weigh-in" in progress_message(p, "lose")
+    # Without a timeline the calorie goal doesn't follow weigh-ins, so nothing restarts
+    assert goal_progress(goal(), logged(10, 1800), BURN, TODAY, weights=[w(TODAY - timedelta(days=3), 159)])["days_logged"] == 10
+
+
+def test_an_unsafe_pace_is_flagged_and_gets_no_finish_date():
+    g = goal(target_date=TODAY + timedelta(days=60), weekly_rate_lbs=1.0)
+    under = goal_progress(g, logged(5, 1000), BURN, TODAY, calorie_floor=1200, max_rate_lbs=1.6)
+    assert under["status"] == "unsafe_pace" and under["days_earlier"] is None and "1000 kcal" in under["warning"]
+    # 1,300 kcal plus an hour of hard exercise: above the floor, but 3+ lb a week
+    fast = goal_progress(g, logged(5, 1300, exercise=900), BURN, TODAY, calorie_floor=1200, max_rate_lbs=1.6)
+    assert fast["status"] == "unsafe_pace" and "lb a week" in progress_message(fast, "lose")
+    fine = goal_progress(g, logged(5, 1300), BURN, TODAY, calorie_floor=1200, max_rate_lbs=1.6)
+    assert fine["status"] == "ahead" and fine["days_earlier"] > 0
+
+
 def test_progress_with_nothing_logged():
     p = goal_progress(goal(), {}, BURN, TODAY)
     assert p["status"] == "not_logged" and p["ahead_kcal"] == 0
