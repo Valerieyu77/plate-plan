@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { addWeightLog, getGoalTimeline, getProgress } from '../api'
+import { addWeightLog, getGoalProgress, getGoalTimeline, getProgress } from '../api'
 import { Bar, Button, Card, DateChip, ErrorNote, Field, Input, Label, Loading, PageHeader, ProgressRing } from '../components/ui'
 import { todayISO } from '../constants'
 import { fmtDate } from '../format'
@@ -17,13 +17,26 @@ const STATUS = {
   reached: ['Goal reached', 'bg-good/10 text-good'],
 }
 
+// Goal progress: [label, tone] for each status
+const PACE = {
+  ahead: ['Ahead of plan', 'bg-good/10 text-good'],
+  on_track: ['On track', 'bg-good/10 text-good'],
+  behind: ['Behind plan', 'bg-brand-soft text-brand-deep'],
+  over: ['Over your goal', 'bg-brand-soft text-brand-deep'],
+  under: ['Under your goal', 'bg-brand-soft text-brand-deep'],
+  not_logged: ['No logs yet', 'bg-bg text-muted'],
+  unsafe_pace: ['Unsafe pace', 'bg-bad/10 text-bad'],
+}
+
 async function loadProgress(userId, date) {
   try {
-    const [progress, timeline] = await Promise.all([
+    const [progress, timeline, goalProgress] = await Promise.all([
       getProgress(userId, date),
       getGoalTimeline(userId).catch((err) => (err.status === 404 ? null : Promise.reject(err))),
+      // 422 when the profile is missing what the burn estimate needs; the rest of the page still works
+      getGoalProgress(userId, date).catch((err) => (err.status === 422 ? null : Promise.reject(err))),
     ])
-    return { ...progress, timeline }
+    return { ...progress, timeline, goalProgress }
   } catch (err) {
     if (err.status === 404) return { missingGoal: true }
     throw err
@@ -103,6 +116,8 @@ export default function ProgressPage({ user, onSetGoal }) {
             </div>
           </Card>
 
+          {progress.goalProgress && <GoalProgressCard data={progress.goalProgress} latestWeighIn={progress.weight_trend.at(-1)} />}
+
           <Card>
             <div className="flex items-baseline justify-between">
               <h2 className="text-lg font-bold">Weight</h2>
@@ -156,6 +171,61 @@ export default function ProgressPage({ user, onSetGoal }) {
         </div>
       )}
     </section>
+  )
+}
+
+// How the logged days add up toward the goal, and the weight the logs suggest next to the scale's
+function GoalProgressCard({ data, latestWeighIn }) {
+  const unsafe = data.status === 'unsafe_pace'
+  const [label, tone] = PACE[data.status] || PACE.on_track
+  // The timeline's latest weigh-in; goals without a timeline have no `scale`, so use the latest log
+  const scaleWeight = data.scale?.latest_weight_lbs ?? latestWeighIn?.weight_lbs
+  return (
+    <Card>
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-lg font-bold">Goal progress</h2>
+        <span className={`shrink-0 rounded-full px-2.5 py-1 text-[12px] font-semibold ${tone}`}>{label}</span>
+      </div>
+
+      {unsafe ? (
+        <p role="alert" className="mt-3 flex gap-2.5 rounded-xl bg-bad/10 p-3.5 text-sm text-bad">
+          <svg viewBox="0 0 24 24" className="mt-px h-5 w-5 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M12 3 2 20h20L12 3ZM12 10v4M12 17h.01" />
+          </svg>
+          <span>{data.message}</span>
+        </p>
+      ) : (
+        <>
+          <p className="mt-2 text-[15px]">{data.message}</p>
+          {data.projected_finish_date && (
+            <p className="mt-1 text-sm text-muted">
+              Projected finish <span className="font-semibold text-ink">{fmtDate(data.projected_finish_date)}</span>
+              {data.target_date && <> · target {fmtDate(data.target_date)}</>}
+            </p>
+          )}
+        </>
+      )}
+
+      {/* Above the weights: the message says "The estimates below use that" */}
+      {data.calibration?.message && <p className="mt-4 border-t border-line pt-3 text-[13px] text-muted">{data.calibration.message}</p>}
+
+      <div className="mt-3 grid grid-cols-2 gap-3">
+        <div className="rounded-xl bg-bg p-3.5">
+          <Label>Estimated weight</Label>
+          <p className="mt-1 text-2xl font-bold tracking-tight">
+            {data.weight.estimated_weight_lbs} <span className="text-sm font-semibold text-muted">lb</span>
+          </p>
+          <p className="mt-0.5 text-[12px] text-muted">From your logs since {fmtDate(data.weight.from_date)}</p>
+        </div>
+        <div className="rounded-xl bg-bg p-3.5">
+          <Label>Scale weight</Label>
+          <p className="mt-1 text-2xl font-bold tracking-tight">
+            {scaleWeight ?? '—'} {scaleWeight != null && <span className="text-sm font-semibold text-muted">lb</span>}
+          </p>
+          <p className="mt-0.5 text-[12px] text-muted">{latestWeighIn ? `Weighed in ${fmtDate(latestWeighIn.date)}` : 'No weigh-in yet'}</p>
+        </div>
+      </div>
+    </Card>
   )
 }
 

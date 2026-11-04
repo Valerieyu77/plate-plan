@@ -123,6 +123,9 @@ export const previewGoal = (userId, targetWeight, targetDate) =>
   request(`/users/${userId}/goal/preview`, { method: 'POST', body: { target_weight_lbs: targetWeight, target_date: targetDate } })
 // Planned vs actual weight; 404 when the goal has no timeline
 export const getGoalTimeline = (userId) => request(`/users/${userId}/goal/timeline`)
+// How the logged days add up: message, status (unsafe_pace comes with a warning and no finish date),
+// the weight the logs suggest, the scale-based status (timeline goals) and the burn calibration
+export const getGoalProgress = (userId, date) => request(`/users/${userId}/goal/progress`, { query: { date } })
 
 // ---------- Menus ----------
 
