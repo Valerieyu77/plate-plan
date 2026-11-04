@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { logIn, signUp } from '../api'
-import { Button, Card, ErrorNote, Field, Input, Segmented, Select, TagInput } from '../components/ui'
+import { Button, Card, ErrorNote, Field, Input, PageHeader, Segmented, Select, TagInput } from '../components/ui'
 import { ACTIVITY_LEVELS, ALLERGIES, DIETARY_RESTRICTIONS, todayISO } from '../constants'
 import { getLastEmail } from '../session'
 
@@ -18,8 +18,8 @@ const EMPTY_FORM = {
   diet: [],
 }
 
-export default function AuthPage({ onSignedIn }) {
-  const [tab, setTab] = useState(getLastEmail() ? 'login' : 'signup')
+export default function AuthPage({ onSignedIn, initialTab }) {
+  const [tab, setTab] = useState(initialTab || (getLastEmail() ? 'login' : 'signup'))
   const [prefillEmail, setPrefillEmail] = useState(getLastEmail)
 
   const goToLogin = (email) => {
@@ -29,21 +29,10 @@ export default function AuthPage({ onSignedIn }) {
 
   return (
     <section>
-      <div className="pt-4 pb-6">
-        <p className="text-[13px] font-semibold text-brand">For UIUC students and staff</p>
-        <h1 className="mt-2 text-[2rem] leading-tight font-bold tracking-tight">Know what to eat before you reach the dining hall.</h1>
-        <p className="mt-3 text-muted">
-          Plate Plan reads today's Illinois dining menus, sets calorie and macro targets for your goal, and shows which dishes fit your next meal.
-        </p>
-        <ol className="no-scrollbar -mx-4 mt-5 flex gap-2 overflow-x-auto px-4">
-          {['Tell us about yourself', 'Pick a goal', 'Plan each meal'].map((step, i) => (
-            <li key={step} className="flex shrink-0 items-center gap-2 rounded-full bg-surface py-1.5 pr-3.5 pl-1.5 text-sm font-medium ring-1 ring-line">
-              <span className="grid h-6 w-6 place-items-center rounded-full bg-brand-soft text-[12px] font-bold text-brand-deep">{i + 1}</span>
-              {step}
-            </li>
-          ))}
-        </ol>
-      </div>
+      <PageHeader
+        title="Welcome to Plate Plan"
+        sub="Sign up to get your daily targets and meal plans, or log in to pick up where you left off."
+      />
 
       <Card>
         <Segmented

@@ -50,3 +50,9 @@ export const INTENSITIES = [
 // The three meals people think in. The data keeps the dining site's own names (light lunch, kosher lunch...),
 // which the backend groups under these (see GET /meal-options).
 export const MEAL_GROUPS = ['breakfast', 'lunch', 'dinner']
+
+// The meal that fits the time of day: breakfast, lunch or dinner
+export function defaultGroup() {
+  const hour = new Date().getHours()
+  return hour < 10 ? 'breakfast' : hour < 15 ? 'lunch' : 'dinner'
+}
