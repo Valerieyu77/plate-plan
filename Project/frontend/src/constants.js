@@ -29,6 +29,24 @@ export function todayISO() {
   return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10)
 }
 
+// Muscle groups GET /users/{id}/workout understands (app/exercises.py MUSCLES); "heart" means cardio
+export const MUSCLE_GROUPS = [
+  { value: 'legs', label: 'Legs' },
+  { value: 'glutes', label: 'Glutes' },
+  { value: 'chest', label: 'Chest' },
+  { value: 'back', label: 'Back' },
+  { value: 'shoulders', label: 'Shoulders' },
+  { value: 'arms', label: 'Arms' },
+  { value: 'core', label: 'Core' },
+  { value: 'heart', label: 'Cardio' },
+]
+
+export const INTENSITIES = [
+  ['light', 'Light'],
+  ['moderate', 'Moderate'],
+  ['hard', 'Hard'],
+]
+
 // The three meals people think in. The data keeps the dining site's own names (light lunch, kosher lunch...),
 // which the backend groups under these (see GET /meal-options).
 export const MEAL_GROUPS = ['breakfast', 'lunch', 'dinner']
