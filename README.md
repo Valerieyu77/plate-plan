@@ -1,14 +1,4 @@
-# Group 6
-Group Name: TEAM_NAME
 
-[MVP Link](https://docs.google.com/document/d/1mmSCIEQjmluVGSqgNbrygXDC9vFZJ26P/edit?pli=1)
-
-Team Members: pinkiey2, gracees7, markw8, ay29
-
-
-Project Manager: uzairs2
-
----
 
 ## What this project does
 
