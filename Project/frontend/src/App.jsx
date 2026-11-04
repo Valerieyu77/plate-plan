@@ -74,8 +74,8 @@ export default function App() {
     if (isNew) return navigate('/goal')
     try {
       await getGoal(u.id)
-      // Signed out, Goal and Progress show this form too: after logging in, stay on the page they asked for
-      navigate(['/goal', '/progress'].includes(route) ? route : '/plan')
+      // Signed out, Plan, Goal and Progress show this form too: after logging in, stay on the page they asked for
+      navigate(['/plan', '/goal', '/progress'].includes(route) ? route : '/')
     } catch {
       navigate('/goal')
     }
