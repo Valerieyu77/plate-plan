@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
-import { getEvents, getGoal, getHallPicks, getProgress } from '../api'
+import { getEnergy, getEvents, getGoal, getHallPicks, getProgress } from '../api'
 import { GREAT_MIN, TIE } from '../components/HallPicks'
 import { Bar, ButtonLink, Card, Label, Loading, ProgressRing } from '../components/ui'
 import { GOALS, defaultGroup, todayISO } from '../constants'
-import { fmt, shortHall } from '../format'
+import { fmt, isoInDays, shortHall } from '../format'
 
 // Each card shows a small picture of its page. Signed in, it's drawn from the user's own goal, today's food and
 // today's hall picks; anything missing (signed out, no goal yet, a failed request) shows the example below instead,
@@ -238,6 +238,8 @@ export default function HomePage({ user }) {
         )}
       </div>
 
+      {userId !== null && <TodayCalories userId={userId} />}
+
       <Label>What you can do</Label>
       {!user && <p className="mt-1 text-sm text-muted">Sign up at the top right to try them with your own numbers.</p>}
       <ol className="mt-3 space-y-3">
@@ -270,6 +272,81 @@ export default function HomePage({ user }) {
 
       <EventsList />
     </section>
+  )
+}
+
+// GET /energy status -> [label, tone]
+const ENERGY_STATUS = {
+  ahead: ['Ahead of plan', 'bg-good/10 text-good'],
+  on_track: ['On track', 'bg-good/10 text-good'],
+  behind: ['Behind plan', 'bg-brand-soft text-brand-deep'],
+  over: ['Over your goal', 'bg-brand-soft text-brand-deep'],
+  under: ['Under your goal', 'bg-brand-soft text-brand-deep'],
+  not_logged: ['Nothing logged yet', 'bg-bg text-muted'],
+}
+
+// -450 -> "−450", 120 -> "+120"
+const signed = (n) => (n == null ? '—' : `${n < 0 ? '−' : n > 0 ? '+' : ''}${Math.abs(n).toLocaleString()}`)
+
+// Today's calories in and out. The backend only says "too_low" once a day is over, so the reminder to eat
+// enough checks yesterday.
+function TodayCalories({ userId }) {
+  const [state, setState] = useState({ userId: null })
+
+  useEffect(() => {
+    let ignore = false
+    Promise.all([getEnergy(userId, todayISO()), getEnergy(userId, isoInDays(-1)).catch(() => null)])
+      .then(([today, yesterday]) => !ignore && setState({ userId, today, yesterday }))
+      // No goal yet (404) or a profile missing what the burn needs (422): the sections below cover that
+      .catch((error) => !ignore && setState({ userId, error }))
+    return () => {
+      ignore = true
+    }
+  }, [userId])
+
+  if (state.userId !== userId) return null
+  if (state.error) {
+    return [404, 422].includes(state.error.status) ? null : <p className="mb-6 text-sm text-muted">Couldn't load today's calories. {state.error.message}</p>
+  }
+
+  const { today, yesterday } = state
+  const [label, tone] = ENERGY_STATUS[today.status] || ENERGY_STATUS.on_track
+  const deficit = today.net != null && today.net < 0
+  return (
+    <Card className="mb-6">
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-lg font-bold">Today's calories</h2>
+        <span className={`shrink-0 rounded-full px-2.5 py-1 text-[12px] font-semibold ${tone}`}>{label}</span>
+      </div>
+
+      <div className="mt-4 grid grid-cols-3 gap-2 text-center">
+        <Stat label="Eaten" value={big(today.eaten)} note={`of ${big(today.calorie_goal)} goal`} />
+        <Stat label="Burned" value={big(today.burned)} note={today.exercise > 0 ? `${big(today.exercise)} from workouts` : 'Body + activity'} />
+        <Stat label="Net" value={signed(today.net)} note={today.net == null ? 'Log a meal' : deficit ? 'Deficit' : 'Surplus'} />
+      </div>
+
+      {yesterday?.status === 'too_low' && (
+        <p role="alert" className="mt-4 flex gap-2.5 rounded-xl bg-bad/10 p-3.5 text-sm text-bad">
+          <svg viewBox="0 0 24 24" className="mt-px h-5 w-5 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M12 3 2 20h20L12 3ZM12 10v4M12 17h.01" />
+          </svg>
+          <span>
+            <span className="font-semibold">You didn't eat enough yesterday.</span> You logged {big(yesterday.eaten)} kcal, under the safe
+            minimum. Aim for your full {big(today.calorie_goal)} kcal today.
+          </span>
+        </p>
+      )}
+    </Card>
+  )
+}
+
+function Stat({ label, value, note }) {
+  return (
+    <div className="rounded-xl bg-bg px-2 py-3">
+      <p className="text-[12px] font-semibold text-muted">{label}</p>
+      <p className="mt-0.5 text-xl font-bold tracking-tight">{value}</p>
+      <p className="mt-0.5 text-[11px] leading-tight text-muted">{note}</p>
+    </div>
   )
 }
 

@@ -154,6 +154,10 @@ export const addWeightLog = (userId, date, weightLbs) =>
 
 export const getProgress = (userId, date) => request(`/users/${userId}/progress`, { query: { date } })
 
+// One day's calories in and out: eaten (null with nothing logged), burned (base_burn + exercise), net, and a
+// status. "too_low" (eaten under the safe minimum) only comes for a past day, never for today.
+export const getEnergy = (userId, date) => request(`/users/${userId}/energy`, { query: { date } })
+
 // ---------- Workouts ----------
 
 // Every filter is optional; with none set, the goal picks the focus. `muscles` and `avoid` are lists
