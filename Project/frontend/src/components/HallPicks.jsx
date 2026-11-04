@@ -4,9 +4,9 @@ import { fmt, shortHall } from '../format'
 import { Button, Card, Label } from './ui'
 
 // Scores within this many points of the best count as the same: a point or two between big halls means nothing
-const TIE = 2
+export const TIE = 2
 // ...and a hall is only a "great match" if its plate really fits, however the others did
-const GREAT_MIN = 75
+export const GREAT_MIN = 75
 // After the first look, wait this long once something is logged, so a run of stepper taps asks only once
 const REFRESH_DELAY_MS = 500
 

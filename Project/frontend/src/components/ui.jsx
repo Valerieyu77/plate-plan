@@ -9,13 +9,16 @@ const BUTTON = {
   soft: 'bg-brand-soft text-brand-deep hover:bg-brand-soft/70',
 }
 
+const buttonClass = (variant, className) =>
+  `rounded-xl px-5 py-3.5 text-[15px] font-semibold transition-colors disabled:opacity-60 ${BUTTON[variant]} ${className}`
+
 export function Button({ variant = 'primary', className = '', ...props }) {
-  return (
-    <button
-      className={`rounded-xl px-5 py-3.5 text-[15px] font-semibold transition-colors disabled:opacity-60 ${BUTTON[variant]} ${className}`}
-      {...props}
-    />
-  )
+  return <button className={buttonClass(variant, className)} {...props} />
+}
+
+// A link that looks like a Button, for moving to another page
+export function ButtonLink({ variant = 'primary', className = '', ...props }) {
+  return <a className={`inline-block text-center ${buttonClass(variant, className)}`} {...props} />
 }
 
 export function Card({ tone = 'bg-surface', className = '', children }) {

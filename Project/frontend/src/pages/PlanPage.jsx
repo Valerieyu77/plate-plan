@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { addFoodLog, deleteFoodLog, getFoodLogs, getHalls, getMealOptions, getMealTarget, getMenuItems, getRecommendations } from '../api'
 import HallPicks from '../components/HallPicks'
 import { Button, Card, ChipScroller, DateChip, ErrorNote, Input, Label, Loading, PageHeader, ProgressRing } from '../components/ui'
-import { ALLERGIES, MEAL_GROUPS, todayISO } from '../constants'
+import { ALLERGIES, MEAL_GROUPS, defaultGroup, todayISO } from '../constants'
 import { fmt, mealLabel, shortHall } from '../format'
 import { getPrefs, setPrefs } from '../session'
 
@@ -22,12 +22,6 @@ const SERVING_STEP = 0.5
 const MAX_SERVINGS = 5
 // Typing allows any amount up to this, in hundredths (e.g. 0.25 of a pizza, 8 cookies)
 const MAX_TYPED_SERVINGS = 20
-
-// The meal that fits the time of day: breakfast, lunch or dinner
-function defaultGroup() {
-  const hour = new Date().getHours()
-  return hour < 10 ? 'breakfast' : hour < 15 ? 'lunch' : 'dinner'
-}
 
 // A group can have more than one menu (lunch: "light lunch" and "lunch"). Start on the plain one.
 const defaultOption = (options) => options.find((o) => o === 'lunch') || options[0] || null
