@@ -151,6 +151,20 @@ export const addWeightLog = (userId, date, weightLbs) =>
 
 export const getProgress = (userId, date) => request(`/users/${userId}/progress`, { query: { date } })
 
+// ---------- Workouts ----------
+
+// Every filter is optional; with none set, the goal picks the focus. `muscles` and `avoid` are lists
+// (avoid = exercise ids to steer away from, for "Swap"). The same day and filters give the same plan.
+export const getWorkout = (userId, { date, focus, intensity, minutes, muscles = [], noEquipment = false, avoid = [] } = {}) =>
+  request(`/users/${userId}/workout`, {
+    query: { date, focus, intensity, minutes, muscles: muscles.join(','), no_equipment: noEquipment || undefined, avoid: avoid.join(',') },
+  })
+
+export const getWorkoutLogs = (userId, date) => request(`/users/${userId}/workout-logs`, { query: { date } })
+// `log` is {exercise_id, minutes, intensity, kcal?, date?}; kcal is worked out on the server when left out
+export const addWorkoutLog = (userId, log) => request(`/users/${userId}/workout-logs`, { method: 'POST', body: log })
+export const deleteWorkoutLog = (userId, logId) => request(`/users/${userId}/workout-logs/${logId}`, { method: 'DELETE' })
+
 // ---------- Recommendations ----------
 
 // `avoid` is a list of item ids to steer away from (the trays already shown), for "Show me another"

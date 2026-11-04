@@ -6,9 +6,10 @@ import GoalPage from './pages/GoalPage'
 import HomePage from './pages/HomePage'
 import PlanPage from './pages/PlanPage'
 import ProgressPage from './pages/ProgressPage'
+import WorkoutPage from './pages/WorkoutPage'
 import { clearToken, getToken, setLastEmail, setToken } from './session'
 
-// Tiny hash router: #/ (home), #/signup, #/login, #/goal, #/plan, #/progress
+// Tiny hash router: #/ (home), #/signup, #/login, #/goal, #/plan, #/workout, #/progress
 const currentRoute = () => window.location.hash.replace(/^#/, '') || '/'
 const navigate = (path) => {
   window.location.hash = path
@@ -31,6 +32,7 @@ function useRoute() {
 const TABS = [
   ['/', 'Home', 'M3 11l9-8 9 8M5 9.5V21h5v-6h4v6h5V9.5'],
   ['/plan', 'Plan', 'M4 6h16M4 12h16M4 18h10'],
+  ['/workout', 'Workout', 'M6.5 6.5v11M17.5 6.5v11M3 9.5v5M21 9.5v5M6.5 12h11'],
   ['/progress', 'Progress', 'M12 3a9 9 0 1 0 9 9M12 3v9h9'],
   ['/goal', 'Goal', 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Zm0-4a5 5 0 1 0 0-10 5 5 0 0 0 0 10Zm0-4a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z'],
 ]
@@ -111,6 +113,7 @@ export default function App() {
   else if (!user || authTab) page = <AuthPage key={route} initialTab={authTab} onSignedIn={signedIn} />
   else if (route === '/goal') page = <GoalPage user={user} onContinue={() => navigate('/plan')} />
   else if (route === '/progress') page = <ProgressPage user={user} onSetGoal={() => navigate('/goal')} />
+  else if (route === '/workout') page = <WorkoutPage user={user} />
   else page = <PlanPage user={user} onSetGoal={() => navigate('/goal')} />
 
   const inApp = user && !restoring && !authTab
@@ -158,7 +161,7 @@ export default function App() {
 
       {inApp && (
         <nav className="fixed inset-x-0 bottom-0 z-20 border-t border-line bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-md">
-          <div className="mx-auto grid max-w-xl grid-cols-4">
+          <div className="mx-auto grid max-w-xl grid-cols-5">
             {TABS.map(([path, label, icon]) => {
               // Any unknown route shows the Plan page, so highlight Plan for it too
               const active = route === path || (path === '/plan' && !TABS.some(([p]) => p === route))
