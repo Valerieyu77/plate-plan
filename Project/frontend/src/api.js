@@ -170,3 +170,9 @@ export const deleteWorkoutLog = (userId, logId) => request(`/users/${userId}/wor
 // `avoid` is a list of item ids to steer away from (the trays already shown), for "Show me another"
 export const getRecommendations = ({ userId, hall, date, meal, avoid = [] }) =>
   request('/recommendations/meals', { query: { user_id: userId, hall, date, meal, avoid: avoid.join(',') } })
+
+// ---------- Campus events ----------
+
+// Exercise events from the campus Recreation calendar for the next `days` days; no login needed.
+// {start, days, source (the calendar page), events: [{title, start, end, all_day, location, description, url}]}
+export const getEvents = (days = 7) => request('/events', { query: { days } })
