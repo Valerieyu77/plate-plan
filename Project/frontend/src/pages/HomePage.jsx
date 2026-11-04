@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { getGoal, getGoalTimeline, getProgress } from '../api'
+import { getEvents, getGoal, getGoalTimeline, getProgress } from '../api'
 import { Bar, Button, Card, ErrorNote, Label, Loading, ProgressRing } from '../components/ui'
 import { todayISO } from '../constants'
 import { fmt, fmtDate } from '../format'
@@ -90,7 +90,75 @@ export default function HomePage({ user, onNavigate }) {
           <Action title="Change your goal" sub="Target weight, date and pace" onClick={() => onNavigate('/goal')} />
         </div>
       </div>
+
+      <EventsList />
     </section>
+  )
+}
+
+const CALENDAR_PAGE = 'https://calendars.illinois.edu/list/637'
+const MAX_EVENTS = 6
+
+// "Wed, Nov 4 · 11:15 AM – 12:45 PM" (event times are campus local time, no zone)
+function eventTime(e) {
+  const start = new Date(e.start)
+  const day = start.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })
+  if (e.all_day) return `${day} · All day`
+  const time = (d) => d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+  return e.end ? `${day} · ${time(start)} – ${time(new Date(e.end))}` : `${day} · ${time(start)}`
+}
+
+// Upcoming exercise events from the campus Recreation calendar (skating, classes, runs...)
+function EventsList() {
+  const [data, setData] = useState(null)
+  const [error, setError] = useState(null)
+
+  useEffect(() => {
+    let ignore = false
+    getEvents()
+      .then((d) => !ignore && setData(d))
+      .catch((err) => !ignore && setError(err))
+    return () => {
+      ignore = true
+    }
+  }, [])
+
+  // The list starts at the beginning of today, so drop what has already ended
+  const now = new Date()
+  const upcoming = (data?.events || []).filter((e) => new Date(e.end || e.start) > now || e.all_day).slice(0, MAX_EVENTS)
+
+  return (
+    <div className="mt-6">
+      <div className="mb-2 flex items-baseline justify-between px-1">
+        <Label>Campus fitness events</Label>
+        <a href={data?.source || CALENDAR_PAGE} target="_blank" rel="noopener noreferrer" className="text-[13px] font-semibold text-brand">
+          Full calendar
+        </a>
+      </div>
+      <Card className="!p-0">
+        {error ? (
+          <p className="p-5 text-sm text-muted">Couldn't load campus events. {error.message}</p>
+        ) : !data ? (
+          <div className="px-5">
+            <Loading>Loading events…</Loading>
+          </div>
+        ) : upcoming.length === 0 ? (
+          <p className="p-5 text-sm text-muted">No fitness events in the next week.</p>
+        ) : (
+          <ul className="divide-y divide-line">
+            {upcoming.map((e) => (
+              <li key={e.url || `${e.title}-${e.start}`}>
+                <a href={e.url || CALENDAR_PAGE} target="_blank" rel="noopener noreferrer" className="block px-5 py-3.5 transition-colors hover:bg-bg">
+                  <span className="block font-semibold">{e.title}</span>
+                  <span className="mt-0.5 block text-[13px] font-medium text-brand">{eventTime(e)}</span>
+                  {e.location && <span className="mt-0.5 block text-[13px] text-muted">{e.location}</span>}
+                </a>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
+    </div>
   )
 }
 
