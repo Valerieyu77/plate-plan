@@ -275,14 +275,14 @@ export default function HomePage({ user }) {
   )
 }
 
-// GET /energy status -> [label, tone]
-const ENERGY_STATUS = {
-  ahead: ['Ahead of plan', 'bg-good/10 text-good'],
-  on_track: ['On track', 'bg-good/10 text-good'],
-  behind: ['Behind plan', 'bg-brand-soft text-brand-deep'],
-  over: ['Over your goal', 'bg-brand-soft text-brand-deep'],
-  under: ['Under your goal', 'bg-brand-soft text-brand-deep'],
-  not_logged: ['Nothing logged yet', 'bg-bg text-muted'],
+// The badge for today: [label, tone]. Today isn't over, so it says how much of the goal is left rather than
+// "ahead" or "behind": half a day's food against a whole day's goal always looks ahead when losing (and behind
+// when gaining). It doesn't use /energy's `status`, so it reads the same whether that says "ahead" or "in_progress".
+function todayBadge({ eaten, calorie_goal: goal }) {
+  if (eaten == null) return ['Nothing logged yet', 'bg-bg text-muted']
+  const left = Math.round(goal - eaten)
+  if (left >= 0) return [`${left.toLocaleString()} kcal left`, 'bg-good/10 text-good']
+  return [`${(-left).toLocaleString()} kcal over`, 'bg-brand-soft text-brand-deep']
 }
 
 // -450 -> "−450", 120 -> "+120"
@@ -310,7 +310,7 @@ function TodayCalories({ userId }) {
   }
 
   const { today, yesterday } = state
-  const [label, tone] = ENERGY_STATUS[today.status] || ENERGY_STATUS.on_track
+  const [label, tone] = todayBadge(today)
   const deficit = today.net != null && today.net < 0
   return (
     <Card className="mb-6">
