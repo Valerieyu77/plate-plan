@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { addWeightLog, getGoalProgress, getGoalTimeline, getProgress } from '../api'
+import { addWeightLog, deleteWeightLog, getGoalProgress, getGoalTimeline, getProgress, getWeightLogs } from '../api'
 import { Bar, Button, Card, DateChip, ErrorNote, Field, Input, Label, Loading, PageHeader, ProgressRing } from '../components/ui'
 import { todayISO } from '../constants'
 import { fmtDate } from '../format'
@@ -30,13 +30,15 @@ const PACE = {
 
 async function loadProgress(userId, date) {
   try {
-    const [progress, timeline, goalProgress] = await Promise.all([
+    const [progress, timeline, goalProgress, weighIns] = await Promise.all([
       getProgress(userId, date),
       getGoalTimeline(userId).catch((err) => (err.status === 404 ? null : Promise.reject(err))),
       // 422 when the profile is missing what the burn estimate needs; the rest of the page still works
       getGoalProgress(userId, date).catch((err) => (err.status === 422 ? null : Promise.reject(err))),
+      // The weigh-ins with their ids, for removing one (weight_trend has only date and weight)
+      getWeightLogs(userId),
     ])
-    return { ...progress, timeline, goalProgress }
+    return { ...progress, timeline, goalProgress, weighIns }
   } catch (err) {
     if (err.status === 404) return { missingGoal: true }
     throw err
@@ -49,6 +51,8 @@ export default function ProgressPage({ user, onSetGoal }) {
   const [weighIn, setWeighIn] = useState({ date: todayISO(), weight: '' })
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState('')
+  const [removing, setRemoving] = useState(null) // {id, busy}: the weigh-in asking "Remove?", or being removed
+  const [removeNote, setRemoveNote] = useState(null) // {text, error}
 
   useEffect(() => {
     let ignore = false
@@ -75,6 +79,22 @@ export default function ProgressPage({ user, onSetGoal }) {
       setSaveError(err.message)
     } finally {
       setSaving(false)
+    }
+  }
+
+  // Remove a weigh-in (a typo, say). The backend moves the current weight back to the latest one left and
+  // replans a timeline goal from it, so reload everything the page shows.
+  const removeWeighIn = async (log) => {
+    setRemoving({ id: log.id, busy: true })
+    setRemoveNote(null)
+    try {
+      await deleteWeightLog(user.id, log.id)
+      setData({ key: date, progress: await loadProgress(user.id, date) })
+      setRemoveNote({ text: `Removed ${log.weight_lbs} lb on ${fmtDate(log.date)}. Your current weight and plan were updated.` })
+    } catch (err) {
+      setRemoveNote({ text: err.message, error: true })
+    } finally {
+      setRemoving(null)
     }
   }
 
@@ -160,23 +180,73 @@ export default function ProgressPage({ user, onSetGoal }) {
               <ErrorNote>{saveError}</ErrorNote>
             </div>
 
-            {progress.weight_trend.length > 0 && (
+            {progress.weighIns.length > 0 && (
               <div className="mt-4">
                 <Label className="mb-1">Recent weigh-ins</Label>
                 <ul className="divide-y divide-line text-sm">
-                  {[...progress.weight_trend].reverse().slice(0, 7).map((w, i) => (
-                    <li key={`${w.date}-${i}`} className="flex justify-between py-2.5">
-                      <span className="text-muted">{fmtDate(w.date)}</span>
-                      <span className="font-semibold">{w.weight_lbs} lb</span>
-                    </li>
+                  {[...progress.weighIns].reverse().slice(0, 7).map((w) => (
+                    <WeighInRow
+                      key={w.id}
+                      log={w}
+                      asking={removing?.id === w.id}
+                      busy={removing?.id === w.id && removing.busy}
+                      disabled={removing?.busy}
+                      onAsk={() => {
+                        setRemoving({ id: w.id, busy: false })
+                        setRemoveNote(null)
+                      }}
+                      onCancel={() => setRemoving(null)}
+                      onRemove={() => removeWeighIn(w)}
+                    />
                   ))}
                 </ul>
+                {removeNote && (
+                  <p role={removeNote.error ? 'alert' : 'status'} className={`mt-2 text-[13px] ${removeNote.error ? 'text-bad' : 'text-muted'}`}>
+                    {removeNote.text}
+                  </p>
+                )}
               </div>
             )}
           </Card>
         </div>
       )}
     </section>
+  )
+}
+
+// One weigh-in: date and weight, and a small ✕ that asks "Remove?" first (removing one changes the current
+// weight and can replan the goal, so it shouldn't happen on a stray tap)
+function WeighInRow({ log, asking, busy, disabled, onAsk, onCancel, onRemove }) {
+  return (
+    <li className="flex min-h-12 items-center justify-between gap-3 py-1.5">
+      <span className="text-muted">{fmtDate(log.date)}</span>
+      {asking ? (
+        <span className="flex items-center gap-2">
+          <span className="font-semibold">Remove {log.weight_lbs} lb?</span>
+          <button type="button" onClick={onRemove} disabled={busy} className="rounded-lg bg-bad/10 px-2.5 py-1.5 text-[13px] font-semibold text-bad disabled:opacity-60">
+            {busy ? 'Removing…' : 'Remove'}
+          </button>
+          <button type="button" onClick={onCancel} disabled={busy} className="rounded-lg px-2 py-1.5 text-[13px] font-semibold text-muted hover:text-ink">
+            Keep
+          </button>
+        </span>
+      ) : (
+        <span className="flex items-center gap-1">
+          <span className="font-semibold">{log.weight_lbs} lb</span>
+          <button
+            type="button"
+            onClick={onAsk}
+            disabled={disabled}
+            aria-label={`Remove the weigh-in of ${log.weight_lbs} lb on ${fmtDate(log.date)}`}
+            className="grid h-8 w-8 place-items-center rounded-full text-muted transition-colors hover:bg-bg hover:text-bad disabled:opacity-40"
+          >
+            <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden="true">
+              <path d="M6 6l12 12M18 6 6 18" />
+            </svg>
+          </button>
+        </span>
+      )}
+    </li>
   )
 }
 

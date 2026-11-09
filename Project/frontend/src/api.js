@@ -152,6 +152,9 @@ export const addFoodLog = (userId, itemId, servings = 1) =>
 export const deleteFoodLog = (userId, logId) => request(`/users/${userId}/food-logs/${logId}`, { method: 'DELETE' })
 
 export const getWeightLogs = (userId) => request(`/users/${userId}/weight-logs`)
+// Remove a weigh-in (a typo, say). 204. The current weight goes back to the latest weigh-in left, and a
+// timeline goal is replanned from it.
+export const deleteWeightLog = (userId, logId) => request(`/users/${userId}/weight-logs/${logId}`, { method: 'DELETE' })
 export const addWeightLog = (userId, date, weightLbs) =>
   request(`/users/${userId}/weight-logs`, { method: 'POST', body: { date, weight_lbs: weightLbs } })
 
