@@ -91,20 +91,36 @@ def test_log_an_exercise_from_the_list_or_your_own(client):
 # ---------- energy and progress ----------
 
 def test_energy_for_a_day_counts_food_and_workouts(client):
+    # PROFILE is "moderate" (4-5 workouts a week): an average day's exercise is already in the burn
     uid = with_goal(client)
     calorie_goal = client.get(f"/users/{uid}/goal").json()["calorie_goal"]
     client.post(f"/users/{uid}/food-logs", json={"item_id": 1, "servings": 2})  # 600 kcal of chicken on DAY
     client.post(f"/users/{uid}/workout-logs", json={"exercise_id": "treadmill", "minutes": 30, "date": DAY})
     e = client.get(f"/users/{uid}/energy?date={DAY}").json()
     walk = 6.0 * 140 / 2.20462 * 0.5  # about 190.5 kcal
-    assert e["eaten"] == 600 and e["exercise"] == pytest.approx(walk, abs=1)
-    assert e["burned"] == pytest.approx(e["base_burn"] + walk, abs=1) and e["net"] == pytest.approx(600 - e["burned"], abs=1)
+    assert e["exercise_logged"] == pytest.approx(walk, abs=1)
+    assert e["exercise_in_activity"] > walk and e["exercise"] == 0  # a normal workout day: nothing counts twice
+    assert e["eaten"] == 600 and e["burned"] == e["base_burn"] and e["net"] == 600 - e["burned"]
     assert e["calorie_goal"] == calorie_goal
-    assert e["vs_plan"] == pytest.approx(-(600 - walk - calorie_goal), abs=1) and e["status"] == "too_low"  # 600 kcal is under the safe minimum
+    assert e["vs_plan"] == pytest.approx(-(600 - calorie_goal), abs=1) and e["status"] == "too_low"  # 600 kcal is under the safe minimum
     assert len(e["workouts"]) == 1 and e["burn_adjusted"] is False
+
+    # A much longer session than usual adds only what goes beyond the usual
+    client.post(f"/users/{uid}/workout-logs", json={"exercise_id": "treadmill", "minutes": 120, "intensity": "hard", "date": DAY})
+    big = client.get(f"/users/{uid}/energy?date={DAY}").json()
+    assert big["exercise"] == pytest.approx(big["exercise_logged"] - big["exercise_in_activity"], abs=1) and big["exercise"] > 0
+    assert big["burned"] == pytest.approx(big["base_burn"] + big["exercise"], abs=1)
 
     empty = client.get(f"/users/{uid}/energy?date=2026-10-09").json()
     assert empty["status"] == "not_logged" and empty["eaten"] is None
+
+
+def test_someone_who_said_not_active_gets_every_workout_counted(client):
+    uid = make_user(client, activity_level="sedentary")
+    client.put(f"/users/{uid}/goal", json={"goal_type": "lose"})
+    client.post(f"/users/{uid}/workout-logs", json={"exercise_id": "treadmill", "minutes": 30, "date": DAY})
+    e = client.get(f"/users/{uid}/energy?date={DAY}").json()
+    assert e["exercise_in_activity"] == 0 and e["exercise"] == e["exercise_logged"] > 0
 
 
 def test_energy_needs_a_goal(client):

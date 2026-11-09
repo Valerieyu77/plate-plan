@@ -25,8 +25,9 @@ only the days since the latest weigh-in are added up.
 Going faster than planned is only "ahead" while it stays safe: eating under the calorie minimum, or
 a real pace beyond the safe maximum (timeline.max_safe_rate()), is flagged instead of praised.
 
-About 3,500 kcal per lb; workouts are estimates too, and if the activity level picked at sign-up
-already counts regular exercise, logging it adds some of it twice. Rough guidance, not medical advice.
+About 3,500 kcal per lb; workouts are estimates too. The activity level picked at sign-up already
+counts an average day's exercise, so a logged workout only adds what goes beyond it (count_workouts).
+Rough guidance, not medical advice.
 """
 
 import math
@@ -41,6 +42,20 @@ MIN_CALIBRATION_DAYS = 14  # between the two smoothed weigh-ins
 CALIBRATION_WINDOW = 42   # look back at most this many days
 MIN_LOGGED_SHARE = 0.7    # of days between the weigh-ins with food logged
 FACTOR_LIMITS = (0.8, 1.2)
+
+
+def count_workouts(days: dict, in_activity: float) -> dict:
+    """
+    Stop counting workouts twice. The daily burn (tdee) already includes an average day's exercise
+    for the activity level picked at sign-up (`in_activity` kcal), so a logged workout only adds what
+    goes beyond that. Each day keeps the logged total as exercise_logged; exercise becomes the extra
+    that counts. Someone who picked "not active" has in_activity 0, so all their workouts count.
+    """
+    for d in days.values():
+        logged = d["exercise"]
+        d["exercise_logged"] = logged
+        d["exercise"] = max(0.0, logged - in_activity)
+    return days
 
 
 def direction_sign(goal_type: str) -> int:

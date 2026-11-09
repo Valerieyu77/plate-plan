@@ -57,6 +57,17 @@ def tdee(user, today: date | None = None) -> float:
     return bmr(user.weight_lbs, user.height_in, age, user.gender) * factor
 
 
+def exercise_in_activity(user, today: date | None = None) -> float:
+    """
+    The exercise already counted in tdee(): the activity level asked at sign-up is how often the user
+    works out, so BMR x factor includes an average day's workouts. This is that part, per day:
+    tdee minus what the same body burns with no exercise (BMR x the sedentary factor).
+    """
+    age = age_from_birthdate(user.birthdate, today)
+    factor = ACTIVITY_FACTORS.get(user.activity_level or DEFAULT_ACTIVITY, ACTIVITY_FACTORS[DEFAULT_ACTIVITY])
+    return bmr(user.weight_lbs, user.height_in, age, user.gender) * (factor - ACTIVITY_FACTORS["sedentary"])
+
+
 def calorie_floor(user) -> int:
     return MIN_CALORIES.get((user.gender or "").strip().lower(), DEFAULT_MIN_CALORIES)
 

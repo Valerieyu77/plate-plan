@@ -81,6 +81,62 @@ class UserSignUp(UserCreate):
         return v
 
 
+class PasswordChange(SQLModel):
+    current_password: str
+    new_password: str = Field(min_length=8)
+
+    @field_validator("new_password")
+    @classmethod
+    def _check_password_length(cls, v):
+        if len(v.encode()) > 72:  # bcrypt only reads the first 72 bytes
+            raise ValueError("password must be at most 72 bytes")
+        return v
+
+
+class AccountDelete(SQLModel):
+    """DELETE /users/{id} asks for the password again, so a forgotten open tab can't wipe an account."""
+    password: str
+
+
+class ProfileUpdate(SQLModel):
+    """
+    PATCH /users/{id}: change any of these; fields left out stay as they are. Weight changes go
+    through weigh-ins (POST .../weight-logs) so the history stays right, and the email is the login.
+    """
+    name: str | None = Field(default=None, min_length=1, max_length=100)
+    height_in: float | None = Field(default=None, gt=0, le=108)
+    gender: str | None = None
+    birthdate: date | None = None
+    activity_level: str | None = None
+    allergies: list[str] | None = None
+    dietary_restrictions: list[str] | None = None
+    meals: list[str] | None = None
+
+    @field_validator("activity_level")
+    @classmethod
+    def _check_activity_level(cls, v):
+        if v is not None and v not in ACTIVITY_LEVELS:
+            raise ValueError(f"activity_level must be one of {ACTIVITY_LEVELS}")
+        return v
+
+    @field_validator("meals")
+    @classmethod
+    def _check_meals(cls, v):
+        return _check_meals(v)
+
+    @field_validator("allergies", "dietary_restrictions")
+    @classmethod
+    def _clean_list(cls, v):
+        if v is None:
+            return v
+        seen, out = set(), []
+        for x in (s.strip() for s in v):
+            if x and x.lower() not in seen:
+                seen.add(x.lower())
+                out.append(x)
+        return out
+
+
 class MealsUpdate(SQLModel):
     """PUT /users/{id}/meals: which meals the user eats each day (null for all three)."""
     meals: list[str] | None
@@ -207,14 +263,52 @@ class FoodLog(SQLModel, table=True):
     servings: float = 1
     # Links to the dish eaten; nullable so older/manual logs still work
     item_id: int | None = Field(default=None, foreign_key="menuitem.id", index=True)
+    # Quick add: food that isn't on a dining hall menu (a snack, a meal off campus). These hold the
+    # whole entry's nutrition (servings is 1); they are None for a menu dish, whose nutrition comes
+    # from the menu item.
+    name: str | None = None
+    kcal: float | None = None
+    protein_g: float | None = None
+    carbs_g: float | None = None
+    fat_g: float | None = None
+
+
+FOOD_LOG_MEALS = ["breakfast", "lunch", "dinner", "snack"]
 
 
 class FoodLogCreate(SQLModel):
-    # The dish eaten. date and meal default to the menu item's own date and meal.
-    item_id: int
+    """
+    A dish from a menu (item_id; date and meal default to the menu item's own), or a quick add for
+    anything else: name and kcal, macros optional, meal one of breakfast / lunch / dinner / snack
+    (default snack), date default today.
+    """
+    item_id: int | None = None
     servings: float = Field(default=1, gt=0)
     date: Date | None = None
     meal: str | None = None
+    name: str | None = Field(default=None, max_length=100)
+    kcal: float | None = Field(default=None, gt=0, le=5000)
+    protein_g: float | None = Field(default=None, ge=0, le=500)
+    carbs_g: float | None = Field(default=None, ge=0, le=1000)
+    fat_g: float | None = Field(default=None, ge=0, le=500)
+
+    @model_validator(mode="after")
+    def _menu_dish_or_quick_add(self):
+        quick = any(v is not None for v in (self.name, self.kcal, self.protein_g, self.carbs_g, self.fat_g))
+        if self.item_id is not None and quick:
+            raise ValueError("send item_id for a menu dish, or name and kcal for a quick add, not both")
+        if self.item_id is None:
+            if not (self.name or "").strip() or self.kcal is None:
+                raise ValueError("send item_id, or a name and kcal for food that isn't on a menu")
+            self.name = self.name.strip()
+            self.meal = (self.meal or "snack").strip().lower()
+            if self.meal not in FOOD_LOG_MEALS:
+                raise ValueError(f"meal must be one of {FOOD_LOG_MEALS}")
+        return self
+
+    @property
+    def is_quick_add(self) -> bool:
+        return self.item_id is None
 
 
 class FoodLogPublic(SQLModel):
@@ -224,6 +318,12 @@ class FoodLogPublic(SQLModel):
     meal: str
     servings: float
     item_id: int | None
+    # Set only for a quick add (whole-entry nutrition)
+    name: str | None = None
+    kcal: float | None = None
+    protein_g: float | None = None
+    carbs_g: float | None = None
+    fat_g: float | None = None
 
 
 # ---------- Workout log ----------
