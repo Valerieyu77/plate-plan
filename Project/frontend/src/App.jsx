@@ -111,7 +111,7 @@ export default function App() {
   else if (route === '/') page = <HomePage user={user} />
   // key: the header's Sign up / Log in links switch the form's tab even while it's open
   else if (!user || authTab) page = <AuthPage key={route} initialTab={authTab} onSignedIn={signedIn} />
-  else if (route === '/goal') page = <GoalPage user={user} onContinue={() => navigate('/plan')} />
+  else if (route === '/goal') page = <GoalPage user={user} onUserChange={setUser} onContinue={() => navigate('/plan')} />
   else if (route === '/progress') page = <ProgressPage user={user} onSetGoal={() => navigate('/goal')} />
   else if (route === '/workout') page = <WorkoutPage user={user} />
   else page = <PlanPage user={user} onSetGoal={() => navigate('/goal')} />

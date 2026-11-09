@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
-import { getGoal, getUser, previewGoal, setGoal } from '../api'
+import { getGoal, getUser, previewGoal, setGoal, setMeals } from '../api'
 import { Button, Card, ErrorNote, Field, Input, Label, PageHeader } from '../components/ui'
-import { GOALS } from '../constants'
-import { fmtDate, isoInDays } from '../format'
+import { GOALS, MEAL_GROUPS, MEAL_WEIGHTS } from '../constants'
+import { fmtDate, isoInDays, mealLabel } from '../format'
 
 // Quick picks for the target date: [label, days from today]
 const DATE_PICKS = [
@@ -18,7 +18,7 @@ const TIERS = {
   unsafe: ['Not safe', 'bg-bad/10 text-bad'],
 }
 
-export default function GoalPage({ user, onContinue }) {
+export default function GoalPage({ user, onUserChange, onContinue }) {
   const [goal, setGoalData] = useState(null)
   const [type, setType] = useState(null)
   const [targetWeight, setTargetWeight] = useState('')
@@ -27,13 +27,20 @@ export default function GoalPage({ user, onContinue }) {
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   // Weigh-ins on the Progress page change the current weight, so ask the server rather than trust the login copy
-  const [currentWeight, setCurrentWeight] = useState(user.weight_lbs)
+  const [profile, setProfile] = useState(user)
+  const currentWeight = profile.weight_lbs
 
   useEffect(() => {
     getUser(user.id)
-      .then((u) => setCurrentWeight(u.weight_lbs))
+      .then(setProfile)
       .catch(() => {})
   }, [user.id])
+
+  // Saved meals: keep this page and the rest of the app (Plan and Home pick the default meal from them) up to date
+  const mealsSaved = (u) => {
+    setProfile(u)
+    onUserChange(u)
+  }
 
   // Show the saved goal if there is one (404 just means not yet)
   useEffect(() => {
@@ -228,6 +235,7 @@ export default function GoalPage({ user, onContinue }) {
               </Card>
             ))}
           </div>
+          <MealsCard userId={user.id} meals={profile.meals} calorieGoal={goal.calorie_goal} onSaved={mealsSaved} />
           <Button onClick={onContinue} variant="dark" className="mt-5 w-full">
             Plan my next meal
           </Button>
@@ -301,6 +309,64 @@ function PlanPreview({ plan, onUseDate, onUseWeight }) {
         </>
       )}
     </div>
+  )
+}
+
+// Which meals the user eats each day. Tapping one saves at once (PUT /users/{id}/meals); at least one stays on.
+// The day's calories are shared between the chosen meals, shown as a share and kcal for each.
+function MealsCard({ userId, meals, calorieGoal, onSaved }) {
+  const chosen = meals?.length ? meals : MEAL_GROUPS // null from the backend means all three
+  const [saving, setSaving] = useState(null) // the meal being toggled
+  const [error, setError] = useState('')
+
+  const toggle = async (meal) => {
+    const next = MEAL_GROUPS.filter((m) => (m === meal ? !chosen.includes(m) : chosen.includes(m)))
+    setSaving(meal)
+    setError('')
+    try {
+      // All three is the backend's default, so send null rather than the full list
+      onSaved(await setMeals(userId, next.length === MEAL_GROUPS.length ? null : next))
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setSaving(null)
+    }
+  }
+
+  const total = chosen.reduce((sum, m) => sum + MEAL_WEIGHTS[m], 0)
+  return (
+    <Card className="mt-3">
+      <h2 className="text-lg font-bold">Meals you eat</h2>
+      <p className="mt-1 text-sm text-muted">Your daily calories are split between these. Skip one and the others get bigger.</p>
+      <div role="group" aria-label="Meals you eat" className="mt-4 grid grid-cols-3 gap-2">
+        {MEAL_GROUPS.map((m) => {
+          const on = chosen.includes(m)
+          const last = on && chosen.length === 1
+          return (
+            <button
+              key={m}
+              type="button"
+              onClick={() => toggle(m)}
+              disabled={saving !== null || last}
+              aria-pressed={on}
+              title={last ? 'Keep at least one meal' : undefined}
+              className={`rounded-xl px-2 py-3 text-center ring-2 transition disabled:cursor-not-allowed ${
+                on ? 'bg-brand-soft ring-brand' : 'bg-bg text-muted ring-transparent hover:ring-line'
+              } ${saving === m ? 'opacity-60' : ''}`}
+            >
+              <span className="block text-[15px] font-semibold">{mealLabel(m)}</span>
+              <span className="mt-0.5 block text-[12px]">
+                {on ? `${Math.round((100 * MEAL_WEIGHTS[m]) / total)}% · ${Math.round((calorieGoal * MEAL_WEIGHTS[m]) / total).toLocaleString()} kcal` : 'Skipped'}
+              </span>
+            </button>
+          )
+        })}
+      </div>
+      {chosen.length === 1 && <p className="mt-2 text-[13px] text-muted">One meal a day gets all of your calories. Keep at least one meal.</p>}
+      <div className="mt-3">
+        <ErrorNote>{error}</ErrorNote>
+      </div>
+    </Card>
   )
 }
 

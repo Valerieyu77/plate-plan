@@ -48,7 +48,7 @@ async function loadMealTarget(userId, date, meal) {
 
 export default function PlanPage({ user, onSetGoal }) {
   const [date, setDate] = useState(todayISO())
-  const [groupPick, setGroupPick] = useState(defaultGroup)
+  const [groupPick, setGroupPick] = useState(() => defaultGroup(user.meals))
   const [hallPick, setHallPick] = useState(() => getPrefs(user.id).hall || null)
   const [optionPick, setOptionPick] = useState(null)
   const [halls, setHalls] = useState({ key: null })

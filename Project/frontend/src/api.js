@@ -114,6 +114,9 @@ export const getMe = () => request('/auth/me')
 // ---------- Users and goals ----------
 
 export const getUser = (userId) => request(`/users/${userId}`)
+// Which meals the user eats each day, e.g. ["breakfast", "dinner"]; null for all three. Returns the user.
+// The day's calories are then shared between those meals only.
+export const setMeals = (userId, meals) => request(`/users/${userId}/meals`, { method: 'PUT', body: { meals } })
 
 // `goal` is {goal_type} for a steady pace, or {target_weight_lbs, target_date} for a timeline
 export const setGoal = (userId, goal) => request(`/users/${userId}/goal`, { method: 'PUT', body: goal })
