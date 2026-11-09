@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { logIn, signUp } from '../api'
 import { Button, Card, ErrorNote, Field, Input, PageHeader, Segmented, Select, TagInput } from '../components/ui'
-import { ACTIVITY_LEVELS, ALLERGIES, DIETARY_RESTRICTIONS, todayISO } from '../constants'
+import { ACTIVITY_LEVELS, ALLERGIES, DIETARY_RESTRICTIONS } from '../constants'
 import { getLastEmail } from '../session'
 
 const EMPTY_FORM = {
@@ -16,6 +16,17 @@ const EMPTY_FORM = {
   activity: 'light',
   allergies: [],
   diet: [],
+}
+
+// The calorie formula (Mifflin-St Jeor) is made for adults; children and young teens need a doctor's advice instead
+const MIN_AGE = 16
+
+// The latest birthday allowed: MIN_AGE years before today, local time (Feb 29 becomes Feb 28)
+function latestBirthdate() {
+  const d = new Date()
+  const year = d.getFullYear() - MIN_AGE
+  const day = Math.min(d.getDate(), new Date(year, d.getMonth() + 1, 0).getDate())
+  return `${year}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
 }
 
 export default function AuthPage({ onSignedIn, initialTab }) {
@@ -69,6 +80,8 @@ function SignUpForm({ onSignedIn, onExistingEmail }) {
     const heightIn = Number(form.heightFt) * 12 + Number(form.heightIn || 0)
     if (!form.sex) return setError({ message: 'Please choose your sex; the calorie calculation needs it.' })
     if (heightIn < 36 || heightIn > 96) return setError({ message: 'Please check your height.' })
+    // The date field's max catches this too, but not every browser checks typed dates
+    if (form.birthdate > latestBirthdate()) return setError({ message: `Plate Plan is for people ${MIN_AGE} and older.` })
     if (form.password.length < 8) return setError({ message: 'Please use a password of at least 8 characters.' })
 
     setBusy(true)
@@ -135,8 +148,8 @@ function SignUpForm({ onSignedIn, onExistingEmail }) {
             <option value="male">Male</option>
           </Select>
         </Field>
-        <Field label="Birthday">
-          <Input required type="date" min="1900-01-01" max={todayISO()} value={form.birthdate} onChange={set('birthdate')} />
+        <Field label="Birthday" hint={`You must be ${MIN_AGE} or older.`}>
+          <Input required type="date" min="1900-01-01" max={latestBirthdate()} value={form.birthdate} onChange={set('birthdate')} />
         </Field>
 
         <Field label="How often do you exercise?" className="col-span-2">
