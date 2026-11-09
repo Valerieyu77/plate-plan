@@ -6,10 +6,11 @@ import GoalPage from './pages/GoalPage'
 import HomePage from './pages/HomePage'
 import PlanPage from './pages/PlanPage'
 import ProgressPage from './pages/ProgressPage'
+import SettingsPage from './pages/SettingsPage'
 import WorkoutPage from './pages/WorkoutPage'
 import { clearToken, getToken, setLastEmail, setToken } from './session'
 
-// Tiny hash router: #/ (home), #/signup, #/login, #/goal, #/plan, #/workout, #/progress
+// Tiny hash router: #/ (home), #/signup, #/login, #/goal, #/plan, #/workout, #/progress, #/settings
 const currentRoute = () => window.location.hash.replace(/^#/, '') || '/'
 const navigate = (path) => {
   window.location.hash = path
@@ -36,6 +37,8 @@ const TABS = [
   ['/progress', 'Progress', 'M12 3a9 9 0 1 0 9 9M12 3v9h9'],
   ['/goal', 'Goal', 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Zm0-4a5 5 0 1 0 0-10 5 5 0 0 0 0 10Zm0-4a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z'],
 ]
+// Pages that exist; any other route shows the Plan page. Settings is opened from the avatar, not a tab.
+const PAGES = [...TABS.map(([path]) => path), '/settings']
 
 export default function App() {
   const route = useRoute()
@@ -76,8 +79,8 @@ export default function App() {
     if (isNew) return navigate('/goal')
     try {
       await getGoal(u.id)
-      // Signed out, every tab but Home shows this form: after logging in, stay on the page they asked for
-      navigate(TABS.some(([path]) => path === route) ? route : '/')
+      // Signed out, every page but Home shows this form: after logging in, stay on the page they asked for
+      navigate(PAGES.includes(route) ? route : '/')
     } catch {
       navigate('/goal')
     }
@@ -114,6 +117,7 @@ export default function App() {
   else if (route === '/goal') page = <GoalPage user={user} onUserChange={setUser} onContinue={() => navigate('/plan')} />
   else if (route === '/progress') page = <ProgressPage user={user} onSetGoal={() => navigate('/goal')} />
   else if (route === '/workout') page = <WorkoutPage user={user} />
+  else if (route === '/settings') page = <SettingsPage user={user} onUserChange={setUser} onDeleted={logOut} />
   else page = <PlanPage user={user} onSetGoal={() => navigate('/goal')} />
 
   const inApp = user && !restoring && !authTab
@@ -128,9 +132,15 @@ export default function App() {
           </a>
           {inApp && (
             <div className="flex items-center gap-2">
-              <span className="grid h-8 w-8 place-items-center rounded-full bg-ink text-sm font-semibold text-white" title={user.name}>
+              <a
+                href="#/settings"
+                aria-label={`Settings for ${user.name}`}
+                title="Settings"
+                aria-current={route === '/settings' ? 'page' : undefined}
+                className={`grid h-8 w-8 place-items-center rounded-full bg-ink text-sm font-semibold text-white ring-offset-2 ring-offset-bg transition hover:ring-2 hover:ring-brand ${route === '/settings' ? 'ring-2 ring-brand' : ''}`}
+              >
                 {user.name.trim().charAt(0).toUpperCase()}
-              </span>
+              </a>
               <button onClick={logOut} className="rounded-lg px-2 py-1.5 text-sm font-medium text-muted transition-colors hover:text-ink">
                 Log out
               </button>
@@ -163,8 +173,8 @@ export default function App() {
         <nav className="fixed inset-x-0 bottom-0 z-20 border-t border-line bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-md">
           <div className="mx-auto grid max-w-xl grid-cols-5">
             {TABS.map(([path, label, icon]) => {
-              // Any unknown route shows the Plan page, so highlight Plan for it too
-              const active = route === path || (path === '/plan' && !TABS.some(([p]) => p === route))
+              // Any unknown route shows the Plan page, so highlight Plan for it too (Settings has no tab)
+              const active = route === path || (path === '/plan' && !PAGES.includes(route))
               return (
                 <a
                   key={path}
