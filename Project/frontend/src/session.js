@@ -34,3 +34,9 @@ export const setLastEmail = (email) => write(LAST_EMAIL_KEY, email)
 // Per-user conveniences the backend doesn't need, e.g. the last hall picked on the Plan page
 export const getPrefs = (userId) => read(prefsKey(userId), {})
 export const setPrefs = (userId, prefs) => write(prefsKey(userId), { ...getPrefs(userId), ...prefs })
+
+// A deleted account: drop what this browser kept about it, so nothing is left behind (the log-in form's email too)
+export function forgetUser(userId, email) {
+  write(prefsKey(userId), null)
+  if (getLastEmail() === email) write(LAST_EMAIL_KEY, null)
+}

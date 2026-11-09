@@ -6,6 +6,17 @@ export const ALLERGIES = [
   'Sesame', 'Corn', 'Coconut', 'Sulfites', 'MSG', 'Red Dye',
 ]
 
+// The calorie formula (Mifflin-St Jeor) is made for adults; children and young teens need a doctor's advice instead
+export const MIN_AGE = 16
+
+// The latest birthday allowed: MIN_AGE years before today, local time (Feb 29 becomes Feb 28)
+export function latestBirthdate() {
+  const d = new Date()
+  const year = d.getFullYear() - MIN_AGE
+  const day = Math.min(d.getDate(), new Date(year, d.getMonth() + 1, 0).getDate())
+  return `${year}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+}
+
 export const DIETARY_RESTRICTIONS = ['vegetarian', 'vegan', 'kosher', 'halal', 'jain', 'no pork', 'no alcohol', 'no gelatin']
 
 // activity_level must be exactly one of these five values

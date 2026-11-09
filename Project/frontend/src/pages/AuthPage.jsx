@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { logIn, signUp } from '../api'
 import { Button, Card, ErrorNote, Field, Input, PageHeader, Segmented, Select, TagInput } from '../components/ui'
-import { ACTIVITY_LEVELS, ALLERGIES, DIETARY_RESTRICTIONS } from '../constants'
+import { ACTIVITY_LEVELS, ALLERGIES, DIETARY_RESTRICTIONS, MIN_AGE, latestBirthdate } from '../constants'
 import { getLastEmail } from '../session'
 
 const EMPTY_FORM = {
@@ -16,17 +16,6 @@ const EMPTY_FORM = {
   activity: 'light',
   allergies: [],
   diet: [],
-}
-
-// The calorie formula (Mifflin-St Jeor) is made for adults; children and young teens need a doctor's advice instead
-const MIN_AGE = 16
-
-// The latest birthday allowed: MIN_AGE years before today, local time (Feb 29 becomes Feb 28)
-function latestBirthdate() {
-  const d = new Date()
-  const year = d.getFullYear() - MIN_AGE
-  const day = Math.min(d.getDate(), new Date(year, d.getMonth() + 1, 0).getDate())
-  return `${year}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
 }
 
 export default function AuthPage({ onSignedIn, initialTab }) {

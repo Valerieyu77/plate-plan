@@ -46,7 +46,9 @@ export function onWaking(fn) {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
-async function request(path, { method = 'GET', body, query } = {}) {
+// passwordCheck: the call checks a password the user typed (change password, delete account), so a 401 means
+// that password was wrong, not that the login expired. It must not log the user out.
+async function request(path, { method = 'GET', body, query, passwordCheck = false } = {}) {
   const url = new URL(API_URL + path)
   for (const [key, value] of Object.entries(query || {})) {
     if (value !== undefined && value !== null && value !== '') url.searchParams.set(key, value)
@@ -91,7 +93,7 @@ async function request(path, { method = 'GET', body, query } = {}) {
   const data = await res.json().catch(() => null)
   if (!res.ok) {
     // A 401 from anything but the login form means the saved login is gone or expired
-    if (res.status === 401 && token) unauthorizedListeners.forEach((fn) => fn())
+    if (res.status === 401 && token && !passwordCheck) unauthorizedListeners.forEach((fn) => fn())
     throw new ApiError(res.status, detailMessage(data) || `Request failed (${res.status})`)
   }
   return data
@@ -110,10 +112,18 @@ export function onUnauthorized(fn) {
 export const signUp = (user) => request('/auth/signup', { method: 'POST', body: user })
 export const logIn = (email, password) => request('/auth/login', { method: 'POST', body: { email, password } })
 export const getMe = () => request('/auth/me')
+// 204; 401 when currentPassword is wrong (the login stays), 422 when the new one is too short or long
+export const changePassword = (currentPassword, newPassword) =>
+  request('/auth/change-password', { method: 'POST', body: { current_password: currentPassword, new_password: newPassword }, passwordCheck: true })
 
 // ---------- Users and goals ----------
 
 export const getUser = (userId) => request(`/users/${userId}`)
+// Send only what changes: name, height_in, gender, birthdate, activity_level, allergies, dietary_restrictions.
+// Returns the user. Height, sex, birthday or activity recalculate the goal's daily targets.
+export const updateProfile = (userId, changes) => request(`/users/${userId}`, { method: 'PATCH', body: changes })
+// Deletes the account and everything stored about it. 204; 401 for a wrong password. Can't be undone.
+export const deleteAccount = (userId, password) => request(`/users/${userId}`, { method: 'DELETE', body: { password }, passwordCheck: true })
 // Which meals the user eats each day, e.g. ["breakfast", "dinner"]; null for all three. Returns the user.
 // The day's calories are then shared between those meals only.
 export const setMeals = (userId, meals) => request(`/users/${userId}/meals`, { method: 'PUT', body: { meals } })
