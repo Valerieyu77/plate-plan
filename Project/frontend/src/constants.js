@@ -51,8 +51,16 @@ export const INTENSITIES = [
 // which the backend groups under these (see GET /meal-options).
 export const MEAL_GROUPS = ['breakfast', 'lunch', 'dinner']
 
-// The meal that fits the time of day: breakfast, lunch or dinner
-export function defaultGroup() {
+// Share of the day's calories for each meal when all three are eaten (SLOT_WEIGHT in app/nutrition.py, keep in sync).
+// A user who skips a meal shares the day between the others in the same proportions.
+export const MEAL_WEIGHTS = { breakfast: 25, lunch: 35, dinner: 40 }
+
+// The meal that fits the time of day: breakfast, lunch or dinner. With the meals the user eats (user.meals,
+// null for all three), a skipped meal moves on to the next one they eat today, or else back to the last one.
+export function defaultGroup(meals) {
   const hour = new Date().getHours()
-  return hour < 10 ? 'breakfast' : hour < 15 ? 'lunch' : 'dinner'
+  const now = hour < 10 ? 'breakfast' : hour < 15 ? 'lunch' : 'dinner'
+  if (!meals?.length || meals.includes(now)) return now
+  const later = MEAL_GROUPS.slice(MEAL_GROUPS.indexOf(now)).find((m) => meals.includes(m))
+  return later || MEAL_GROUPS.filter((m) => meals.includes(m)).at(-1)
 }

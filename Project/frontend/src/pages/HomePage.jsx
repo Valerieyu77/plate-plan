@@ -200,6 +200,8 @@ const SECTIONS = [
 
 export default function HomePage({ user }) {
   const userId = user?.id ?? null
+  // The meals the user eats, as a string so the effect below doesn't re-run for an equal new array
+  const mealsKey = user?.meals?.join(',') || ''
   const [data, setData] = useState({ userId: null })
 
   // Loaded every time home opens, so it reflects the latest goal and logs
@@ -207,7 +209,7 @@ export default function HomePage({ user }) {
     if (userId === null) return
     let ignore = false
     const today = todayISO()
-    const group = defaultGroup()
+    const group = defaultGroup(mealsKey ? mealsKey.split(',') : null)
     // No goal yet (404) or a failed request just leaves that card on its example
     const orNull = (request) => request.catch(() => null)
     Promise.all([orNull(getGoal(userId)), orNull(getProgress(userId, today)), orNull(getHallPicks(userId, today, group))]).then(
@@ -216,7 +218,7 @@ export default function HomePage({ user }) {
     return () => {
       ignore = true
     }
-  }, [userId])
+  }, [userId, mealsKey])
 
   const loading = userId !== null && data.userId !== userId
   const loaded = userId !== null && !loading ? data : null
