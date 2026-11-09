@@ -3,7 +3,7 @@ import { addFoodLog, deleteFoodLog, getFoodLogs, getHalls, getMealOptions, getMe
 import HallPicks from '../components/HallPicks'
 import { Button, Card, ChipScroller, DateChip, ErrorNote, Input, Label, Loading, PageHeader, ProgressRing } from '../components/ui'
 import { ALLERGIES, MEAL_GROUPS, defaultGroup, todayISO } from '../constants'
-import { fmt, mealLabel, shortHall } from '../format'
+import { fmt, fmtDate, mealLabel, shortHall } from '../format'
 import { getPrefs, setPrefs } from '../session'
 
 
@@ -197,6 +197,8 @@ export default function PlanPage({ user, onSetGoal }) {
   // Log `servings` of a dish (0 removes it). The API can't edit a log, so a new amount replaces the old one:
   // add the new log first and remove the old one only once that worked, so a failure never loses what was logged.
   const logServings = async (item, servings) => {
+    // A future day: nothing new can be logged, but an amount logged earlier can still be lowered or removed
+    if (date > todayISO() && servings > (logByItem.get(item.id)?.servings || 0)) return
     const log = logByItem.get(item.id)
     setActionError('')
     setPending((p) => new Set(p).add(item.id))
@@ -222,6 +224,7 @@ export default function PlanPage({ user, onSetGoal }) {
   // Log every dish of the recommended tray. All-or-nothing as far as we can: add every new log first, undo them if
   // one fails, and only then remove the entries they replace. The tray's dishes are locked while this runs.
   const logTray = async () => {
+    if (date > todayISO()) return
     const lines = current?.rec?.items || []
     const ids = lines.map((l) => l.item_id)
     const created = []
@@ -277,6 +280,9 @@ export default function PlanPage({ user, onSetGoal }) {
       setRecBusy(false)
     }
   }
+
+  // Menus are published ahead, so a later date can be browsed and planned, but not logged as eaten yet
+  const future = date > todayISO()
 
   const trayLogged = (current?.rec?.items || []).length > 0 && current.rec.items.every((l) => logByItem.get(l.item_id)?.servings === l.servings)
 
@@ -345,6 +351,7 @@ export default function PlanPage({ user, onSetGoal }) {
               rec={current.rec}
               itemsById={itemsById}
               logged={trayLogged}
+              logBlockedLabel={future ? `Log on ${fmtDate(date)}` : null}
               logBusy={trayBusy}
               anotherBusy={recBusy}
               noMore={noMore}
@@ -357,9 +364,14 @@ export default function PlanPage({ user, onSetGoal }) {
             <div className="mb-3 flex items-baseline justify-between">
               <h2 className="text-lg font-bold">Menu</h2>
               <p className="text-[13px] text-muted">
-                {current.items.length} dishes · {current.items.filter((i) => logByItem.has(i.id)).length} eaten
+                {current.items.length} dishes{!future && ` · ${current.items.filter((i) => logByItem.has(i.id)).length} eaten`}
               </p>
             </div>
+            {future && (
+              <p className="mb-3 rounded-xl bg-brand-soft px-3.5 py-2.5 text-sm text-brand-deep">
+                This is the menu for {fmtDate(date)}. You can check off what you eat on that day.
+              </p>
+            )}
             <Input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search dishes" aria-label="Search dishes" />
             {!q && smallCount > 0 && (
               <div className="mt-2 flex items-center justify-between px-1 text-[13px] text-muted">
@@ -390,6 +402,7 @@ export default function PlanPage({ user, onSetGoal }) {
                           item={item}
                           servings={logByItem.get(item.id)?.servings || 0}
                           busy={pending.has(item.id)}
+                          locked={future}
                           onServings={(n) => logServings(item, n)}
                         />
                       ))}
@@ -407,12 +420,14 @@ export default function PlanPage({ user, onSetGoal }) {
   )
 }
 
-function DishRow({ item, servings, busy, onServings }) {
+// locked: a future date, so there is no "ate this" circle. A dish already logged for that day (before logging ahead
+// was blocked) keeps its stepper, so it can still be removed.
+function DishRow({ item, servings, busy, locked, onServings }) {
   const checked = servings > 0
   const serving = item.serving_size ? `${item.serving_size} ${item.serving_unit || ''}`.trim() : null
   return (
     <li className={`flex items-center gap-2 pr-4 transition-colors ${busy ? 'opacity-60' : ''}`}>
-      <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 py-3 pl-4 active:bg-bg">
+      <label className={`flex min-w-0 flex-1 items-center gap-3 py-3 pl-4 ${locked ? '' : 'cursor-pointer active:bg-bg'}`}>
         <div className="min-w-0 flex-1">
           <p className="flex items-center gap-2 font-medium">
             <span className="truncate">{item.name}</span>
@@ -426,22 +441,25 @@ function DishRow({ item, servings, busy, onServings }) {
           </p>
           {allergensOf(item).length > 0 && <p className="mt-0.5 text-[12px] text-muted">Contains {allergensOf(item).join(', ')}</p>}
         </div>
-        <input type="checkbox" checked={checked} disabled={busy} onChange={() => onServings(checked ? 0 : 1)} aria-label={`Ate ${item.name}`} className="peer sr-only" />
-        {!checked && (
+        {!locked && (
+          <input type="checkbox" checked={checked} disabled={busy} onChange={() => onServings(checked ? 0 : 1)} aria-label={`Ate ${item.name}`} className="peer sr-only" />
+        )}
+        {!checked && !locked && (
           <span
             aria-hidden="true"
             className="grid h-7 w-7 shrink-0 place-items-center rounded-full border-2 border-line text-transparent transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-brand/40"
           />
         )}
       </label>
-      {checked && <ServingStepper name={item.name} servings={servings} busy={busy} onChange={onServings} />}
+      {checked && <ServingStepper name={item.name} servings={servings} busy={busy} canAdd={!locked} onChange={onServings} />}
     </li>
   )
 }
 
 // − 1.5 + : at the lowest step, − removes the dish. The number can also be typed: Enter or leaving the field
 // saves it, Escape puts it back, and 0 removes the dish.
-function ServingStepper({ name, servings, busy, onChange }) {
+// canAdd false (a future date): the amount can only go down
+function ServingStepper({ name, servings, busy, canAdd = true, onChange }) {
   const btn = 'grid h-7 w-7 place-items-center rounded-full text-lg leading-none font-semibold transition-colors disabled:opacity-40'
   const [draft, setDraft] = useState(null) // what is being typed; null when not editing
   const [invalid, setInvalid] = useState(false)
@@ -507,7 +525,7 @@ function ServingStepper({ name, servings, busy, onChange }) {
       </label>
       <button
         type="button"
-        disabled={busy || servings >= MAX_SERVINGS}
+        disabled={busy || !canAdd || servings >= MAX_SERVINGS}
         onClick={() => onChange(servings + SERVING_STEP)}
         aria-label={`More servings of ${name}`}
         className={`${btn} bg-brand text-white active:bg-brand-deep`}
@@ -566,7 +584,8 @@ function MealTargetCard({ target, meal, group, onSetGoal }) {
   )
 }
 
-function RecommendationCard({ rec, itemsById, logged, logBusy, anotherBusy, noMore, onLog, onAnother }) {
+// logBlockedLabel: set for a future date, where the tray can't be logged yet (e.g. "Log on Nov 12")
+function RecommendationCard({ rec, itemsById, logged, logBlockedLabel, logBusy, anotherBusy, noMore, onLog, onAnother }) {
   const lines = rec.items || []
   return (
     <Card tone="bg-ink" className="text-white">
@@ -597,8 +616,8 @@ function RecommendationCard({ rec, itemsById, logged, logBusy, anotherBusy, noMo
       {noMore && <p className="mt-2 text-[13px] text-white/60">That's all the different plates I can build from this menu.</p>}
       {lines.length > 0 && (
         <div className="mt-4 grid grid-cols-2 gap-2">
-          <Button onClick={onLog} disabled={logBusy || logged} className="w-full !py-3">
-            {logged ? 'Logged ✓' : logBusy ? 'Logging…' : 'Log this tray'}
+          <Button onClick={onLog} disabled={logBusy || logged || Boolean(logBlockedLabel)} className="w-full !py-3">
+            {logged ? 'Logged ✓' : logBlockedLabel || (logBusy ? 'Logging…' : 'Log this tray')}
           </Button>
           <Button onClick={onAnother} disabled={anotherBusy || logBusy} variant="soft" className="w-full !py-3">
             {anotherBusy ? 'Finding…' : 'Show me another'}
