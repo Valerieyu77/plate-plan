@@ -3,6 +3,7 @@ import { addWeightLog, getGoalProgress, getGoalTimeline, getProgress } from '../
 import { Bar, Button, Card, DateChip, ErrorNote, Field, Input, Label, Loading, PageHeader, ProgressRing } from '../components/ui'
 import { todayISO } from '../constants'
 import { fmtDate } from '../format'
+import AddedFoodCard from '../components/AddedFood'
 
 const MACROS = [
   ['protein_g', 'Protein', 'bg-ink'],
@@ -61,6 +62,14 @@ export default function ProgressPage({ user, onSetGoal }) {
   }, [user.id, date])
   const current = data.key === date ? data : null
   const progress = current?.progress
+  // After food is added or removed on this page: reload the day's totals and the goal progress
+  const reloadProgress = async () => {
+    try {
+      setData({ key: date, progress: await loadProgress(user.id, date) })
+    } catch (error) {
+      setData({ key: date, error })
+    }
+  }
 
   const saveWeight = async (e) => {
     e.preventDefault()
@@ -121,6 +130,8 @@ export default function ProgressPage({ user, onSetGoal }) {
               ))}
             </div>
           </Card>
+
+          <AddedFoodCard userId={user.id} date={date} onChanged={reloadProgress} />
 
           {progress.goalProgress && <GoalProgressCard data={progress.goalProgress} latestWeighIn={progress.weight_trend.at(-1)} />}
 

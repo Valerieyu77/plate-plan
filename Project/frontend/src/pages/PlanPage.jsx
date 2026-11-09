@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { addFoodLog, deleteFoodLog, getFoodLogs, getHalls, getMealOptions, getMealTarget, getMenuItems, getRecommendations } from '../api'
 import HallPicks from '../components/HallPicks'
+import QuickAddButton from '../components/QuickAdd'
 import { Button, Card, ChipScroller, DateChip, ErrorNote, Input, Label, Loading, PageHeader, ProgressRing } from '../components/ui'
 import { ALLERGIES, MEAL_GROUPS, defaultGroup, todayISO } from '../constants'
 import { fmt, fmtDate, mealLabel, shortHall } from '../format'
@@ -371,6 +372,22 @@ export default function PlanPage({ user, onSetGoal }) {
               <p className="mb-3 rounded-xl bg-brand-soft px-3.5 py-2.5 text-sm text-brand-deep">
                 This is the menu for {fmtDate(date)}. You can check off what you eat on that day.
               </p>
+            )}
+            {/* Food from elsewhere for this meal: it counts like a dish, so the budget and tray follow */}
+            {!future && (
+              <div className="mb-3 flex items-center justify-between gap-3 px-1 text-[13px] text-muted">
+                <span>Ate something that isn't on this menu?</span>
+                <QuickAddButton
+                  userId={user.id}
+                  date={date}
+                  defaultMeal={groupPick}
+                  onAdded={(log) => {
+                    showFlash(`Added ${log.name}`)
+                    reloadAfterLogging({ refreshRec: true }).catch((err) => setActionError(err.message))
+                  }}
+                  className="shrink-0 font-semibold text-brand"
+                />
+              </div>
             )}
             <Input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search dishes" aria-label="Search dishes" />
             {!q && smallCount > 0 && (
