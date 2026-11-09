@@ -28,7 +28,10 @@ Status: ✅ built and merged, 🟡 build with mock data first, ⬜ not started.
 | See this meal's target and the dishes the user can eat | `GET /users/{id}/meal-target` ✅, `GET /menu-items?user_id=` ✅ |
 | Get recommended dishes for that meal | `GET /recommendations/meals` 🟡 (D) |
 | Check off / un-check what was eaten | `POST` ✅ and `DELETE /users/{id}/food-logs` ✅ |
-| Log weight | `POST /users/{id}/weight-logs` ✅ |
+| Quick-add a snack or a meal off campus (name + kcal) | `POST /users/{id}/food-logs` ✅ |
+| Log weight, remove a wrong weigh-in | `POST` ✅ and `DELETE /users/{id}/weight-logs` ✅ |
+| Edit the profile (height, activity, allergies, diet, meals) | `PATCH /users/{id}` ✅ |
+| Change password, delete the account | `POST /auth/change-password` ✅, `DELETE /users/{id}` ✅ |
 | Progress page: target vs actual, weight trend, plan vs actual weight | `GET /users/{id}/progress` ✅, `GET /users/{id}/goal/timeline` ✅ |
 | Get a workout (pick muscles, length, intensity, or nothing at all) | `GET /users/{id}/workout` ✅, `GET /exercises` ✅ |
 | Log a workout (optional) | `POST`, `GET`, `DELETE /users/{id}/workout-logs` ✅ |
@@ -62,8 +65,26 @@ Create an account. Returns `201` with `{"token": "...", "user": {...}}` (the use
 ### `GET /auth/me` ✅
 The user the token belongs to. The frontend calls it on page load to restore the session.
 
+### `POST /auth/change-password` ✅
+`{"current_password": "...", "new_password": "..."}` for the logged-in user. `204`; `401` if the current password is wrong (or not logged in); `422` if the new one is under 8 characters or over 72 bytes. The token in use keeps working.
+
+Not built: resetting a forgotten password by email (needs an email service and one-time reset links).
+
 ### `GET /users/{id}` ✅
 Returns the same shape as above plus `id`.
+
+### `PATCH /users/{id}` ✅
+Edit the profile. Send only what changes, any of: `name`, `height_in`, `gender`, `birthdate`, `activity_level`, `allergies`, `dietary_restrictions`, `meals` (to clear a list, send `[]`). Returns the user.
+```json
+{ "allergies": ["Milk", "Peanuts"], "activity_level": "active" }
+```
+- Allergies and diet change the dishes shown and recommended right away.
+- A change to height, sex, birthday or activity level recalculates the goal's daily targets (a timeline goal is replanned for the time left).
+- `email` and `weight_lbs` are ignored here: the email is the login, and weight changes go through weigh-ins so the history stays right.
+- `422` for an unknown activity level, a non-positive height, an empty `meals`, or `null` for name, height, sex, birthday or activity.
+
+### `DELETE /users/{id}` ✅
+Delete the account and everything stored about it (food, weight and workout logs, the goal, the profile). Body `{"password": "..."}`: the password is asked again. `204`; `401` for a wrong password. Can't be undone.
 
 ### `PUT /users/{id}/meals` ✅
 `{"meals": ["breakfast", "dinner"]}` (or `null` for all three). Returns the user. The day's calories are then shared between those meals only, in the usual 25 : 35 : 40 proportions: skipping lunch gives breakfast about 38% and dinner about 62% of the day, so plates get bigger; one meal a day gets the whole day. Meal targets, recommendations and hall picks all follow. `422` for an empty list or an unknown meal.
@@ -219,11 +240,15 @@ Recommended dishes for one meal. Without `avoid` the answer is always the same. 
 - The candidate dishes are the ones from `GET /menu-items?user_id=` (allergies/restrictions already applied); D chooses among them.
 
 ### `POST /users/{id}/food-logs` ✅
-Log a dish. `date` and `meal` default to the menu item's own.
+Log a dish from a menu. `date` and `meal` default to the menu item's own.
 ```json
 { "item_id": 1234, "servings": 1.5 }
 ```
-Returns `201`: `{ "id", "user_id", "date", "meal", "servings", "item_id" }`. `404` if user or item is missing, `422` if `servings <= 0`.
+Or **quick-add** anything else (a snack, a meal off campus): a `name` and `kcal`, macros optional, `meal` one of `breakfast`, `lunch`, `dinner`, `snack` (default `snack`), `date` default today.
+```json
+{ "name": "Chipotle bowl", "kcal": 850, "protein_g": 40, "meal": "lunch" }
+```
+Returns `201`: `{ "id", "user_id", "date", "meal", "servings", "item_id", "name", "kcal", "protein_g", "carbs_g", "fat_g" }` (the last five are set only for a quick add, as the whole entry's nutrition). Quick adds count everywhere a menu dish does: progress, meal targets, energy, goal progress. A `snack` comes off the day without taking a breakfast, lunch or dinner slot; macros left out count as 0. `404` if user or item is missing; `422` if `servings <= 0`, a quick add misses its name or kcal (0 < kcal ≤ 5000), or both `item_id` and quick-add fields are sent.
 
 ### `GET /users/{id}/food-logs?date=` ✅
 That day's logs, same shape as above, as a list.
@@ -239,6 +264,9 @@ Un-check a dish. `204`, or `404` if the log doesn't exist or belongs to another 
 
 ### `GET /users/{id}/weight-logs` ✅
 The list, oldest first.
+
+### `DELETE /users/{id}/weight-logs/{log_id}` ✅
+Remove a weigh-in (a typo, say). `204`, or `404` if it doesn't exist or belongs to another user. The current weight goes back to the latest weigh-in left (or the goal's start weight when none is left), and a timeline goal is replanned from it, the same way a new weigh-in replans it.
 
 ### `GET /users/{id}/progress?date=` ✅
 Target vs actual for a day, plus the weight history for the trend chart. `404` if the user has no goal yet.
@@ -302,6 +330,8 @@ One day's calories in and out. `404` without a goal, `422` if the profile is mis
 }
 ```
 `net` = eaten - burned (negative is a deficit). `vs_plan` is how far the day was from the plan in the goal's direction (positive is ahead: a bigger deficit when losing, a bigger surplus when gaining); it is simply eaten - workouts - calorie goal, so it doesn't depend on the burn estimate. `status`: `ahead`, `on_track` (within 100 kcal), `behind`; for maintain `on_track`, `over`, `under`; `not_logged` (and `eaten: null`) when no food was logged that day; `too_low` for a past day eaten under the safe calorie minimum; `in_progress` for today once something is logged (today isn't over, so it is never called ahead, behind or too low; the numbers are what was logged so far). `day_complete` is `false` for today, `true` for past days. `burn_adjusted` says whether `base_burn` has been corrected from the user's weigh-ins (see below).
+
+Workouts aren't counted twice: the activity level picked at sign-up is how often the user works out, so `base_burn` already includes an average day's exercise (`exercise_in_activity` kcal, 0 for "not active"). `exercise_logged` is everything logged that day; `exercise` (used in `burned`, `net` and `vs_plan`) is only the part beyond `exercise_in_activity`. A normal workout day adds nothing; an unusually long session adds the extra.
 
 ### `GET /users/{id}/goal/progress?date=` ✅
 How the logged days add up, from the goal's start (or the last 4 weeks without a timeline) to yesterday. Days without food logs don't count. For a timeline goal the count restarts at the latest weigh-in (`since`, with `since_weigh_in: true`): each weigh-in replans the calories for what is left, which already makes up for the days before it.

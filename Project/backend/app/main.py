@@ -13,7 +13,8 @@ from sqlmodel import Session, func, select
 from .auth import CurrentUserDep, OwnerOnly, create_token, hash_password, verify_password
 from .database import create_db_and_tables, get_session
 from .models import (
-    AuthResponse, FoodLog, FoodLogCreate, FoodLogPublic, Goal, GoalCreate, GoalPublic, LogIn, MealsUpdate, MenuItem,
+    AccountDelete, AuthResponse, FoodLog, FoodLogCreate, FoodLogPublic, Goal, GoalCreate, GoalPublic, LogIn,
+    MealsUpdate, MenuItem, PasswordChange, ProfileUpdate,
     MenuItemPublic, User, UserPublic, UserSignUp, WeightLog, WeightLogCreate, WeightLogPublic, WorkoutLog,
     WorkoutLogCreate, WorkoutLogPublic,
 )
@@ -23,7 +24,8 @@ from .timeline import max_safe_rate, plan_goal, replan, timeline
 from .picks import high_protein_target, match_score, protein_share
 from .nutrition import (
     GROUP_ORDER, MEAL_GROUP, MEAL_ORDER, NUTRIENTS, add_nutrients, daily_targets, day_progress, goal_to_targets,
-    calorie_floor, item_nutrients, meal_target, meals_in_group, missing_profile_fields, tdee, zero_nutrients,
+    calorie_floor, exercise_in_activity, item_nutrients, meal_target, meals_in_group, missing_profile_fields, tdee,
+    zero_nutrients,
 )
 from . import energy, events
 from .exercises import BY_ID as EXERCISES_BY_ID, EXERCISES, MUSCLES, kcal_burned, video_url
@@ -102,11 +104,69 @@ def read_me(user: CurrentUserDep):
     return user
 
 
+@app.post("/auth/change-password", status_code=204)
+def change_password(body: PasswordChange, user: CurrentUserDep, session: SessionDep):
+    """Change the logged-in user's password; the current one is required. 401 if it is wrong, 422 if
+    the new one is under 8 characters. The token the user has keeps working."""
+    if not verify_password(body.current_password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Your current password is incorrect")
+    user.password_hash = hash_password(body.new_password)
+    session.add(user)
+    session.commit()
+
+
 @app.get("/users/{user_id}", response_model=UserPublic, dependencies=[OwnerOnly])
 def read_user(user_id: int, session: SessionDep):
     user = session.get(User, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+    return user
+
+
+@app.delete("/users/{user_id}", status_code=204, dependencies=[OwnerOnly])
+def delete_account(user_id: int, body: AccountDelete, session: SessionDep):
+    """
+    Delete the account and everything stored about it: food, weight and workout logs, the goal and
+    the profile. The password is asked again. Can't be undone.
+    """
+    user = session.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if not verify_password(body.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Incorrect password")
+    for table in (FoodLog, WeightLog, WorkoutLog):
+        for row in session.exec(select(table).where(table.user_id == user_id)).all():
+            session.delete(row)
+    goal = session.get(Goal, user_id)
+    if goal:
+        session.delete(goal)
+    session.flush()  # the logs and goal point at the user, so they go first
+    session.delete(user)
+    session.commit()
+
+
+@app.patch("/users/{user_id}", response_model=UserPublic, dependencies=[OwnerOnly])
+def update_profile(user_id: int, body: ProfileUpdate, session: SessionDep):
+    """
+    Edit the profile: name, height, sex, birthday, activity level, allergies, diet, meals. Send only
+    what changes (to clear a list, send []). Allergies and diet change which dishes are shown and
+    recommended right away; body and activity changes recalculate the goal's daily targets (a timeline
+    goal is replanned for the time left). Weight changes go through weigh-ins.
+    """
+    user = session.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    changes = body.model_dump(exclude_unset=True)
+    for field in ("name", "height_in", "gender", "birthdate", "activity_level"):
+        if field in changes and changes[field] is None:
+            raise HTTPException(status_code=422, detail=f"{field} can't be removed, only changed")
+    for key, value in changes.items():
+        setattr(user, key, value)
+    session.add(user)
+    if changes.keys() & {"height_in", "gender", "birthdate", "activity_level"}:
+        _refresh_goal(session, user)
+    session.commit()
+    session.refresh(user)
     return user
 
 
@@ -142,8 +202,20 @@ def list_meals(hall: str, date: date, session: SessionDep, main_only: bool = Fal
 
 @app.post("/users/{user_id}/food-logs", response_model=FoodLogPublic, status_code=201, dependencies=[OwnerOnly])
 def create_food_log(user_id: int, log: FoodLogCreate, session: SessionDep):
+    """
+    Log a menu dish ({"item_id", "servings"}) or quick-add anything else ({"name", "kcal"}, macros
+    optional, meal default "snack", date default today): a snack, a meal off campus. Quick adds count
+    everywhere a menu dish does (meal targets, progress, energy, goal progress).
+    """
     if not session.get(User, user_id):
         raise HTTPException(status_code=404, detail="User not found")
+    if log.is_quick_add:
+        db_log = FoodLog(user_id=user_id, date=log.date or _today(), meal=log.meal, servings=1, name=log.name,
+                         kcal=log.kcal, protein_g=log.protein_g, carbs_g=log.carbs_g, fat_g=log.fat_g)
+        session.add(db_log)
+        session.commit()
+        session.refresh(db_log)
+        return db_log
     item = session.get(MenuItem, log.item_id)
     if not item:
         raise HTTPException(status_code=404, detail="Menu item not found")
@@ -363,6 +435,49 @@ def create_weight_log(user_id: int, entry: WeightLogCreate, session: SessionDep)
     return log
 
 
+@app.delete("/users/{user_id}/weight-logs/{log_id}", status_code=204, dependencies=[OwnerOnly])
+def delete_weight_log(user_id: int, log_id: int, session: SessionDep):
+    """
+    Remove a weigh-in (a typo, say). The user's current weight goes back to the latest weigh-in that
+    is left (or the goal's start weight when none is left), and a timeline goal is replanned from it,
+    the same way a new weigh-in replans it.
+    """
+    user = session.get(User, user_id)
+    log = session.get(WeightLog, log_id)
+    if not user or not log or log.user_id != user_id:
+        raise HTTPException(status_code=404, detail="Weight log not found")
+    session.delete(log)
+    session.flush()
+    latest = session.exec(select(WeightLog).where(WeightLog.user_id == user_id)
+                          .order_by(WeightLog.date.desc(), WeightLog.id.desc())).first()
+    goal = session.get(Goal, user_id)
+    fallback = goal.start_weight_lbs if goal and goal.start_weight_lbs else user.weight_lbs
+    user.weight_lbs = latest.weight_lbs if latest else fallback
+    session.add(user)
+    _refresh_goal(session, user, timeline_only=True)
+    session.commit()
+
+
+def _refresh_goal(session: Session, user: User, timeline_only: bool = False) -> None:
+    """Recalculate the saved goal's daily targets after the profile or weight changed: a timeline goal
+    is replanned for what is left by its date; a plain goal (unless timeline_only) gets the same
+    goal type's targets for the new profile. Nothing to do without a goal or with an incomplete profile."""
+    goal = session.get(Goal, user.id)
+    if not goal or not goal.goal_type or missing_profile_fields(user):
+        return
+    if goal.target_date:
+        targets = replan(user, goal.goal_type, goal.target_weight_lbs, goal.target_date, _today())
+    elif timeline_only:
+        return
+    else:
+        targets = daily_targets(user, goal.goal_type, _today())
+    targets.pop("warning", None)
+    for key, value in targets.items():
+        if hasattr(goal, key):
+            setattr(goal, key, value)
+    session.add(goal)
+
+
 @app.get("/users/{user_id}/weight-logs", response_model=list[WeightLogPublic], dependencies=[OwnerOnly])
 def list_weight_logs(user_id: int, session: SessionDep):
     if not session.get(User, user_id):
@@ -372,17 +487,32 @@ def list_weight_logs(user_id: int, session: SessionDep):
 
 # ---------- Targets and progress ----------
 
-def _consumed_by_meal(session: Session, user_id: int, day: date) -> dict[str, dict]:
-    """{meal: nutrients eaten} from the user's food logs for a day. Logs without a menu item are skipped."""
-    rows = session.exec(
+def _food_logs_with_items(session: Session, user_id: int, start: date, end: date):
+    """(log, menu item or None) for the user's food logs from start to end inclusive."""
+    return session.exec(
         select(FoodLog, MenuItem)
-        .join(MenuItem, MenuItem.id == FoodLog.item_id)
-        .where(FoodLog.user_id == user_id, FoodLog.date == day)
+        .join(MenuItem, MenuItem.id == FoodLog.item_id, isouter=True)
+        .where(FoodLog.user_id == user_id, FoodLog.date >= start, FoodLog.date <= end)
     ).all()
+
+
+def _log_nutrients(log: FoodLog, item: MenuItem | None) -> dict:
+    """What a food log adds up to: a menu dish times its servings, or a quick add's own numbers
+    (macros left out count as 0). A log with neither (very old data) counts as nothing."""
+    if item is not None:
+        return item_nutrients(item, log.servings)
+    if log.kcal is not None:
+        return item_nutrients(log, 1)
+    return zero_nutrients()
+
+
+def _consumed_by_meal(session: Session, user_id: int, day: date) -> dict[str, dict]:
+    """{meal: nutrients eaten} from the user's food logs for a day, menu dishes and quick adds alike.
+    A snack is its own "meal": it comes off the day without taking a breakfast, lunch or dinner slot."""
     by_meal: dict[str, dict] = {}
-    for log, item in rows:
+    for log, item in _food_logs_with_items(session, user_id, day, day):
         total = by_meal.setdefault(log.meal, zero_nutrients())
-        by_meal[log.meal] = add_nutrients(total, item_nutrients(item, log.servings))
+        by_meal[log.meal] = add_nutrients(total, _log_nutrients(log, item))
     return by_meal
 
 
@@ -664,13 +794,9 @@ def _ledger_days(session: Session, user_id: int, start: date, end: date) -> dict
     """{day: {"eaten": kcal or None, "exercise": kcal}} for start..end inclusive. eaten is None on
     a day with no food logged (unknown, not zero)."""
     days = {}
-    rows = session.exec(
-        select(FoodLog, MenuItem).join(MenuItem, MenuItem.id == FoodLog.item_id)
-        .where(FoodLog.user_id == user_id, FoodLog.date >= start, FoodLog.date <= end)
-    ).all()
-    for log, item in rows:
+    for log, item in _food_logs_with_items(session, user_id, start, end):
         d = days.setdefault(log.date, {"eaten": 0.0, "exercise": 0.0})
-        d["eaten"] += item_nutrients(item, log.servings)["kcal"]
+        d["eaten"] += _log_nutrients(log, item)["kcal"]
     for w in session.exec(select(WorkoutLog).where(WorkoutLog.user_id == user_id, WorkoutLog.date >= start,
                                                    WorkoutLog.date <= end)).all():
         days.setdefault(w.date, {"eaten": None, "exercise": 0.0})["exercise"] += w.kcal
@@ -687,7 +813,7 @@ def _energy_context(session: Session, user_id: int, today: date):
     if missing:
         raise HTTPException(status_code=422, detail=f"profile is missing: {', '.join(missing)}")
     start = min(goal.start_date or today, today - timedelta(days=energy.CALIBRATION_WINDOW))
-    days = _ledger_days(session, user_id, start, today)
+    days = energy.count_workouts(_ledger_days(session, user_id, start, today), exercise_in_activity(user, today))
     weights = session.exec(select(WeightLog).where(WeightLog.user_id == user_id).order_by(WeightLog.date, WeightLog.id)).all()
     formula = tdee(user, today)
     calibration = energy.calibrate(days, [w for w in weights if w.date <= today], formula, today)
@@ -702,9 +828,11 @@ def read_energy(user_id: int, date: date, session: SessionDep):
     "on_track", "behind", or "over"/"under" for maintain; "not_logged" with no food logged;
     "too_low" for a past day under the safe calorie minimum). Today isn't over, so its status is
     "in_progress" (the numbers are what was logged so far) and day_complete is false.
+    Workouts: exercise_logged is everything logged; exercise is the part beyond the average day's
+    exercise the activity level already includes (exercise_in_activity), so nothing counts twice.
     """
     user, goal, days, _, burn, calibration = _energy_context(session, user_id, date)
-    d = days.get(date, {"eaten": None, "exercise": 0.0})
+    d = days.get(date, {"eaten": None, "exercise": 0.0, "exercise_logged": 0.0})
     workouts = session.exec(select(WorkoutLog).where(WorkoutLog.user_id == user_id, WorkoutLog.date == date)
                             .order_by(WorkoutLog.id)).all()
     complete = date < _today()
@@ -719,6 +847,10 @@ def read_energy(user_id: int, date: date, session: SessionDep):
         "goal_type": goal.goal_type,
         "calorie_goal": goal.calorie_goal,
         **balance,
+        # exercise (above) is what counts on top of the daily burn; the rest of what was logged is
+        # already part of the activity level picked at sign-up
+        "exercise_logged": round(d["exercise_logged"]),
+        "exercise_in_activity": round(exercise_in_activity(user, date)),
         "day_complete": complete,
         "workouts": [WorkoutLogPublic.model_validate(w) for w in workouts],
         "burn_adjusted": calibration["factor"] != 1.0,
