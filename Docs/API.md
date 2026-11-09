@@ -7,7 +7,7 @@ first and update this file in the same PR.
 Base URL: `http://127.0.0.1:8000` locally. Interactive docs: `/docs`.
 
 ## Conventions
-- JSON everywhere. Dates are ISO strings: `"2026-10-08"`.
+- JSON everywhere. Dates are ISO strings: `"2026-10-08"`. "Today" is the date in Champaign (America/Chicago), not the server's UTC date, so an Illinois evening isn't already tomorrow.
 - Units: weight in **lbs**, height in **inches**, nutrients in **g** (sodium in mg), energy in **kcal**.
 - All nutrient values on a menu item are **per ONE serving**.
 - Login: `POST /auth/signup` and `POST /auth/login` return `{token, user}`. Send the token on every request as `Authorization: Bearer <token>`. Every `/users/{id}/...` endpoint, and `user_id=` on `/menu-items` and `/recommendations/meals`, only accepts that user's own token. Tokens last 30 days.
@@ -23,6 +23,7 @@ Status: ✅ built and merged, 🟡 build with mock data first, ⬜ not started.
 |---|---|
 | Sign up with body info / log in | `POST /auth/signup` ✅, `POST /auth/login` ✅, `GET /auth/me` ✅ |
 | Set a goal (steady pace or target weight + date), get daily targets | `POST /users/{id}/goal/preview` ✅, `PUT /users/{id}/goal` ✅ |
+| Choose which meals you eat each day (e.g. skip lunch) | `PUT /users/{id}/meals` ✅ (or `meals` at sign-up) |
 | Pick a meal first, then a hall that serves it | `GET /halls?meal=` ✅, `GET /meal-options` ✅ |
 | See this meal's target and the dishes the user can eat | `GET /users/{id}/meal-target` ✅, `GET /menu-items?user_id=` ✅ |
 | Get recommended dishes for that meal | `GET /recommendations/meals` 🟡 (D) |
@@ -46,12 +47,14 @@ Create an account. Returns `201` with `{"token": "...", "user": {...}}` (the use
   "weight_lbs": 140, "height_in": 64, "gender": "female",
   "birthdate": "2004-05-17", "activity_level": "moderate",
   "allergies": ["Milk", "Peanuts"],
-  "dietary_restrictions": ["vegetarian"]
+  "dietary_restrictions": ["vegetarian"],
+  "meals": ["breakfast", "dinner"]
 }
 ```
 - `allergies` names: Milk, Eggs, Fish, Shellfish, Peanuts, Tree Nuts, Soy, Wheat, Gluten, Sesame, Corn, Coconut, Sulfites, MSG, Red Dye.
 - `dietary_restrictions`: vegetarian, vegan, kosher, halal, jain, no pork, no alcohol, no gelatin. (See `app/dietary.py`.)
 - `activity_level` (optional, default `light`): one of `sedentary`, `light`, `moderate`, `active`, `very_active`. Anything else gets `422`.
+- `meals` (optional, default `null` = all three): which meals the user eats each day, any of `breakfast`, `lunch`, `dinner`. Returned cleaned up, in day order. Change it later with `PUT /users/{id}/meals`.
 
 ### `POST /auth/login` ✅
 `{"email": "...", "password": "..."}` → `{"token": "...", "user": {...}}`. Returns `401 "Incorrect email or password"` for a wrong password or an unknown email alike. Accounts made before login existed have no password and can't log in; sign up again.
@@ -61,6 +64,9 @@ The user the token belongs to. The frontend calls it on page load to restore the
 
 ### `GET /users/{id}` ✅
 Returns the same shape as above plus `id`.
+
+### `PUT /users/{id}/meals` ✅
+`{"meals": ["breakfast", "dinner"]}` (or `null` for all three). Returns the user. The day's calories are then shared between those meals only, in the usual 25 : 35 : 40 proportions: skipping lunch gives breakfast about 38% and dinner about 62% of the day, so plates get bigger; one meal a day gets the whole day. Meal targets, recommendations and hall picks all follow. `422` for an empty list or an unknown meal.
 
 ### `PUT /users/{id}/goal` ✅
 Set the goal; the daily targets are calculated and saved. Send **either** a goal type (steady pace, no end date) **or** a timeline:
@@ -164,7 +170,7 @@ Nutrients are per ONE serving.
 What is left to eat at this meal. What was logged at other meals is subtracted from the day's target; the rest is shared between this meal and every part of the day with nothing logged yet (a meal that wasn't logged counts as still to come, so dinner with nothing logged is about 40% of the day, not all of it); then what is already logged at this meal is subtracted. If protein, carbs and fat together would need more calories than are left, protein is kept and carbs and fat are scaled down to fit (so you never see e.g. 235 kcal with 120 g protein). This is the target the recommendation step is asked to hit.
 ```json
 {
-  "date": "2026-10-08", "meal": "dinner",
+  "date": "2026-10-08", "meal": "dinner", "meals_eaten": ["breakfast", "lunch", "dinner"],
   "daily_target":       { "kcal": 1450, "protein_g": 127, "carbs_g": 160, "fat_g": 40 },
   "target":             { "kcal": 820,  "protein_g": 70,  "carbs_g": 95,  "fat_g": 24 },
   "meal_budget":        { "kcal": 820,  "protein_g": 70,  "carbs_g": 95,  "fat_g": 24 },
@@ -173,7 +179,7 @@ What is left to eat at this meal. What was logged at other meals is subtracted f
 }
 ```
 `404` if the user has no goal yet; `422` if `meal` is not breakfast, lunch, light lunch, dinner, kosher lunch or kosher dinner.
-Meal weights: breakfast 0.25, lunch / light lunch 0.35, dinner 0.40 (renormalised over this meal and the meals with nothing logged yet).
+Meal weights: breakfast 0.25, lunch / light lunch 0.35, dinner 0.40 (renormalised over this meal and the meals with nothing logged yet). Only the meals in the user's `meals` (echoed as `meals_eaten`) count as still to come; the meal asked about always counts, so a lunch eaten on a day off from the routine still gets its share and is taken off the day once logged.
 
 ### `GET /users/{id}/hall-picks?date=&meal=` ✅
 Which hall suits the user best for a meal (`breakfast`, `lunch` or `dinner`). At every hall that serves it, the best plate for what the user still needs at that meal is built (same logic as the recommendation), and scored: `match` is 0 to 100, how close the plate gets to the four targets (calories and protein count most). Each hall also gets a **high-protein plate** that stays inside the same calories (about 40% of calories from protein). Allergies and diet are respected. Halls are sorted by `match`; a hall where nothing is left to eat is left out. `404` without a goal, `422` for another meal name.
@@ -207,6 +213,7 @@ Recommended dishes for one meal. Without `avoid` the answer is always the same. 
 }
 ```
 - `items[].kcal` etc. are the **totals for that line** (per-serving × `servings`).
+- At most 2 servings of any dish, so you don't get "3 servings of salad"; a bigger meal (someone who eats twice a day) gets more dishes instead. Same for `GET .../hall-picks`.
 - `note` is set when no exact match was possible ("closest option: ...").
 - `target` is the `target` from `GET /users/{id}/meal-target`.
 - The candidate dishes are the ones from `GET /menu-items?user_id=` (allergies/restrictions already applied); D chooses among them.
@@ -272,7 +279,7 @@ A workout for the day. Every parameter is optional. Working out is the user's ch
   "note": null
 }
 ```
-A plan is a 5-minute warm-up (strength and mixed), the main block, and a 5-minute stretch (25 minutes or more). Strength goes round the muscle groups one move each (at most 8 moves; a long session adds sets, then a short cardio finisher). `kcal` = MET x weight (kg) x hours, an estimate; `null` without a weight on the profile. What was eaten never makes the workout harder; it only sets `note` (e.g. "Eat something first, especially before a hard session"). `422` for an unknown choice.
+A plan is a 5-minute warm-up (strength and mixed), the main block, and a 5-minute stretch (25 minutes or more). Strength goes round the muscle groups one move each, each a different movement (no three kinds of squat), at most 3 moves per group and 8 in all; time left over goes into extra sets, then a short finisher on a gym cardio machine. `kcal` = MET x weight (kg) x hours, an estimate; `null` without a weight on the profile. What was eaten never makes the workout harder; it only sets `note`: eating well over the goal ("you don't need to burn it off"), or having logged less than a quarter of the goal so far ("have a snack first"). Being under the goal mid-day is normal and gets no note. `422` for an unknown choice.
 
 ### `POST /users/{id}/workout-logs` ✅
 ```json
@@ -294,7 +301,7 @@ One day's calories in and out. `404` without a goal, `422` if the profile is mis
   "burn_adjusted": false
 }
 ```
-`net` = eaten - burned (negative is a deficit). `vs_plan` is how far the day was from the plan in the goal's direction (positive is ahead: a bigger deficit when losing, a bigger surplus when gaining); it is simply eaten - workouts - calorie goal, so it doesn't depend on the burn estimate. `status`: `ahead`, `on_track` (within 100 kcal), `behind`; for maintain `on_track`, `over`, `under`; `not_logged` (and `eaten: null`) when no food was logged that day; `too_low` for a past day eaten under the safe calorie minimum (today isn't over, so it never shows for today). `burn_adjusted` says whether `base_burn` has been corrected from the user's weigh-ins (see below).
+`net` = eaten - burned (negative is a deficit). `vs_plan` is how far the day was from the plan in the goal's direction (positive is ahead: a bigger deficit when losing, a bigger surplus when gaining); it is simply eaten - workouts - calorie goal, so it doesn't depend on the burn estimate. `status`: `ahead`, `on_track` (within 100 kcal), `behind`; for maintain `on_track`, `over`, `under`; `not_logged` (and `eaten: null`) when no food was logged that day; `too_low` for a past day eaten under the safe calorie minimum; `in_progress` for today once something is logged (today isn't over, so it is never called ahead, behind or too low; the numbers are what was logged so far). `day_complete` is `false` for today, `true` for past days. `burn_adjusted` says whether `base_burn` has been corrected from the user's weigh-ins (see below).
 
 ### `GET /users/{id}/goal/progress?date=` ✅
 How the logged days add up, from the goal's start (or the last 4 weeks without a timeline) to yesterday. Days without food logs don't count. For a timeline goal the count restarts at the latest weigh-in (`since`, with `since_weigh_in: true`): each weigh-in replans the calories for what is left, which already makes up for the days before it.
@@ -311,7 +318,7 @@ How the logged days add up, from the goal's start (or the last 4 weeks without a
 How the logs and the scale fit together (`app/energy.py`): the logs give the day-to-day picture and the scale corrects it. `weight` is the latest smoothed weigh-in (the average of the readings in the week before it) plus the calories logged since. Once there are two weeks between weigh-ins with food logged on most days, the weight really lost or gained shows how much this person burns; `calibration.factor` (0.8-1.2, pulled toward 1 with little data) then scales the daily burn in these estimates (the calorie goal itself still comes from the formula). `scale` is the weigh-in-based status from `GET .../goal/timeline` (`null` without a timeline). `days_earlier` and `projected_finish_date` (from the logs) only for a timeline goal. `status` is `unsafe_pace` (with a `warning`, used as the `message`, and no finish date) when the logged days average under the safe calorie minimum, or point to losing or gaining faster than the safe pace from the goal timeline rules; going faster is only "ahead" while it is safe. Rough estimates (about 3,500 kcal per lb), not medical advice.
 
 ### `GET /events?start=&days=&fitness_only=&q=` ✅
-Upcoming events from the campus [Recreation, Health & Wellness calendar](https://calendars.illinois.edu/list/637) (read as iCal, cached for an hour). By default the exercise ones (skating, classes, runs, ...) in the next 7 days; `fitness_only=false` adds the other wellness events; `q` searches the title, place and description; `days` 1-31. No login needed.
+Upcoming events from the campus [Recreation, Health & Wellness calendar](https://calendars.illinois.edu/list/637) (read as iCal, cached for an hour). By default the exercise ones (skating, classes, runs, ...) in the next 7 days, judged by the event's title, or a place that is only for exercise (Ice Arena, pool); an event merely held at the ARC, like a blood drive, isn't counted; `fitness_only=false` adds the other wellness events; `q` searches the title, place and description; `days` 1-31. No login needed.
 ```json
 { "start": "2026-10-28", "days": 7, "source": "https://calendars.illinois.edu/list/637",
   "events": [ { "title": "Lunch Skate", "start": "2026-10-28T11:15:00", "end": "2026-10-28T12:30:00", "all_day": false,

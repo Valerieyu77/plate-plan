@@ -8,6 +8,21 @@ Date = date
 
 ACTIVITY_LEVELS = ["sedentary", "light", "moderate", "active", "very_active"]
 GOAL_TYPES = ["lose", "maintain", "gain"]
+MEAL_CHOICES = ["breakfast", "lunch", "dinner"]
+
+
+def _check_meals(v):
+    """Which meals the user eats each day: a non-empty subset of MEAL_CHOICES, returned in day order.
+    None means all three."""
+    if v is None:
+        return None
+    meals = {m.strip().lower() for m in v}
+    unknown = sorted(meals - set(MEAL_CHOICES))
+    if unknown:
+        raise ValueError(f"meals must be chosen from {MEAL_CHOICES}; unknown: {unknown}")
+    if not meals:
+        raise ValueError("pick at least one meal a day")
+    return [m for m in MEAL_CHOICES if m in meals]
 
 
 # ---------- User ----------
@@ -26,6 +41,14 @@ class UserBase(SQLModel):
     # Food needs and preferences (lists)
     allergies: list[str] = Field(default_factory=list, sa_column=Column(JSON))
     dietary_restrictions: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    # The meals eaten each day, e.g. ["breakfast", "dinner"]; None means all three. The day's calories
+    # are shared between these meals only (see nutrition.meal_target).
+    meals: list[str] | None = Field(default=None, sa_column=Column(JSON))
+
+    @field_validator("meals")
+    @classmethod
+    def _check_meals(cls, v):
+        return _check_meals(v)
 
     @field_validator("activity_level")
     @classmethod
@@ -56,6 +79,16 @@ class UserSignUp(UserCreate):
         if len(v.encode()) > 72:
             raise ValueError("password must be at most 72 bytes")
         return v
+
+
+class MealsUpdate(SQLModel):
+    """PUT /users/{id}/meals: which meals the user eats each day (null for all three)."""
+    meals: list[str] | None
+
+    @field_validator("meals")
+    @classmethod
+    def _check_meals(cls, v):
+        return _check_meals(v)
 
 
 class UserPublic(UserBase):

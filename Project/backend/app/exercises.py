@@ -209,6 +209,18 @@ EXERCISES += [
      "tip": "Stretch to mild tension, never to pain."},
 ]
 
+# The movement each strength move trains, so a plan doesn't stack three kinds of squat
+PATTERNS = {
+    "goblet-squat": "squat", "back-squat": "squat", "leg-press": "squat", "bodyweight-squat": "squat",
+    "lunges": "lunge", "step-up": "lunge", "rdl": "hinge", "glute-bridge": "hinge",
+    "push-up": "push", "db-bench": "push", "chest-press": "push",
+    "lat-pulldown": "pull", "cable-row": "pull", "db-row": "pull",
+    "shoulder-press": "press", "lateral-raise": "raise", "biceps-curl": "curl", "triceps-pushdown": "extension",
+    "plank": "hold", "dead-bug": "hold", "knee-raise": "crunch",
+}
+for _e in EXERCISES:
+    _e["pattern"] = PATTERNS.get(_e["id"], _e["id"])  # cardio and stretches are their own pattern
+
 BY_ID = {e["id"]: e for e in EXERCISES}
 
 

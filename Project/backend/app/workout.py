@@ -23,9 +23,11 @@ COOL_DOWN_FROM = 25
 MINUTES_PER_SET = 1.5  # one set plus the rest after it
 CORE_MINUTES = 5
 MAX_STRENGTH_MOVES = 8  # more than this in one session is too many different things to learn
+MAX_PER_GROUP = 3       # moves for any one muscle group; past that, the plan adds sets instead
 FINISHER_MAX = 15       # most minutes of cardio added to fill a strength session
 MAX_SETS = 5            # a long session adds sets to its moves, up to this many
 WARM_UP_MACHINES = ["treadmill", "bike", "elliptical", "rower", "track"]
+FINISHER_MACHINES = WARM_UP_MACHINES + ["stair-climber"]
 NO_EQUIPMENT = {"Bodyweight", "Dumbbells or bodyweight", "Indoor track", "Mat"}
 
 
@@ -73,11 +75,14 @@ def _cardio_choices(no_equipment: bool, minutes: float, ids: list[str] | None = 
     return [[e for e in pool if _usable(e, no_equipment) and e.get("max_minutes", MAX_MINUTES) >= minutes]]
 
 
-def _strength_for(group: str, no_equipment: bool) -> list[list[dict]]:
-    """Strength moves for a muscle group: first the ones that mainly train it, then the ones that
-    also work it (a push-up counts for arms once the curls are used)."""
+def _strength_for(group: str, no_equipment: bool, used_patterns=frozenset(), repeats: bool = True) -> list[list[dict]]:
+    """Strength moves for a muscle group, best first: moves that mainly train it with a movement not
+    yet in the plan (a lunge after a squat, not a second squat), then moves that also work it with a
+    new movement (a push-up counts for arms once the curls are used), then, if `repeats`, the rest."""
     moves = [e for e in EXERCISES if e["kind"] == "strength" and group in e["muscles"] and _usable(e, no_equipment)]
-    return [[e for e in moves if e["muscles"][0] == group], moves]
+    main = [e for e in moves if e["muscles"][0] == group]
+    new = lambda pool: [e for e in pool if e["pattern"] not in used_patterns]
+    return [new(main), new(moves)] + ([main, moves] if repeats else [])
 
 
 def build_plan(focus: str, intensity: str = "moderate", minutes: int | None = None, weight_lbs: float | None = None,
@@ -131,17 +136,22 @@ def build_plan(focus: str, intensity: str = "moderate", minutes: int | None = No
         # Go round the muscle groups, one move each, until the strength time is used up
         budget = main - cardio_minutes
         per_move = BY_ID["goblet-squat"]["dose"][intensity]["sets"] * MINUTES_PER_SET
-        moves = 0
+        moves, per_group, patterns = 0, dict.fromkeys(groups, 0), set()
         while budget >= per_move * 0.75 and moves < MAX_STRENGTH_MOVES:
             added = False
             for group in groups:
                 if budget < per_move * 0.75 or moves >= MAX_STRENGTH_MOVES:
                     break
-                move = _pick(_strength_for(group, no_equipment), rng, avoid, taken)
+                if per_group[group] >= MAX_PER_GROUP:
+                    continue
+                # A second squat only if the plan would otherwise be too thin; else more sets instead
+                move = _pick(_strength_for(group, no_equipment, patterns, repeats=moves < 2), rng, avoid, taken)
                 if move:
                     add(move)
+                    patterns.add(move["pattern"])
                     budget -= lines[-1]["minutes"]
                     moves += 1
+                    per_group[group] += 1
                     added = True
             if not added:
                 break
@@ -160,7 +170,8 @@ def build_plan(focus: str, intensity: str = "moderate", minutes: int | None = No
         # Time left over (few moves for these groups, or a long session): finish with some cardio
         if budget >= WARM_UP:
             finish = min(budget, FINISHER_MAX)
-            finisher = _pick(_cardio_choices(no_equipment, finish), rng, avoid, taken)
+            # A gym machine, not the pool: nobody changes into swimwear for the last 10 minutes
+            finisher = _pick(_cardio_choices(no_equipment, finish, FINISHER_MACHINES), rng, avoid, taken)
             if finisher:
                 add(finisher, finish)
 

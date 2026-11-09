@@ -153,11 +153,18 @@ def test_workout_focus_follows_the_goal(goal, focus):
 
 def test_eating_more_never_makes_the_workout_harder_it_only_adds_a_note():
     over = recommend_workout("lose", 2000, 2000 + SURPLUS_KCAL + 1)
-    under = recommend_workout("lose", 2000, 2000 - SURPLUS_KCAL - 1)
     even = recommend_workout("lose", 2000, 2000 + SURPLUS_KCAL)
-    assert over["intensity"] == under["intensity"] == even["intensity"] == "moderate"
+    assert over["intensity"] == even["intensity"] == "moderate"
     assert over["note"] and "don't need to burn it off" in over["note"]
-    assert under["note"] and even["note"] is None
+    assert even["note"] is None
+
+
+def test_being_under_the_goal_mid_day_is_normal_only_a_very_low_intake_gets_a_snack_note():
+    dinner_time = recommend_workout("lose", 2000, 1100)  # breakfast and lunch logged, dinner to come
+    low = recommend_workout("lose", 2000, 300)
+    nothing_logged = recommend_workout("lose", 2000, 0)  # unknown, not "starving"
+    assert dinner_time["note"] is None and nothing_logged["note"] is None
+    assert low["note"] and "snack" in low["note"] and low["intensity"] == "moderate"
 
 
 def test_the_user_picks_the_intensity_and_harder_means_longer_by_default():

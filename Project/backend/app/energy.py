@@ -220,13 +220,16 @@ def goal_progress(goal, days: dict, base_burn: float, today: date, weights: list
     return result
 
 
-def progress_message(progress: dict, goal_type: str) -> str:
-    """One friendly sentence for the progress card."""
+def progress_message(progress: dict, goal_type: str, today_logged: bool = False) -> str:
+    """One friendly sentence for the progress card. today_logged: food is logged today, which only
+    counts once the day is over."""
     n, status = progress["days_logged"], progress["status"]
     logged = f"{n} logged day{'s' if n != 1 else ''}"
     if status == "unsafe_pace":
         return progress["warning"]
     if not n:
+        if today_logged:
+            return "Today's meals count once the day is over. Check back tomorrow to see how your days add up."
         if progress.get("since_weigh_in"):
             return "Your weigh-in updated your plan. Log what you eat to see how the next days add up."
         return "Log what you eat to see how your days add up toward your goal."

@@ -173,3 +173,10 @@ def test_the_food_on_the_day_of_a_weigh_in_counts_after_it():
     assert est["estimated_weight_lbs"] == pytest.approx(165 - 500 / KCAL_PER_LB, abs=0.05)
     assert "1 logged day," in progress_message({"days_logged": 1, "status": "ahead", "ahead_kcal": 500,
                                                 "ahead_lbs": 0.14, "days_earlier": 1}, "lose")
+
+
+def test_only_todays_logs_says_to_check_back_tomorrow():
+    p = goal_progress(goal(), {TODAY: {"eaten": 600, "exercise": 0}}, BURN, TODAY)
+    assert p["days_logged"] == 0
+    assert "once the day is over" in progress_message(p, "lose", today_logged=True)
+    assert "Log what you eat" in progress_message(p, "lose")

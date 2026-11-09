@@ -170,7 +170,7 @@ def _fit_macros_to_calories(target: dict) -> dict:
     return {"kcal": kcal, "protein_g": protein, "carbs_g": carbs * factor, "fat_g": fat * factor}
 
 
-def meal_target(daily: dict, consumed_by_meal: dict[str, dict], meal: str) -> dict:
+def meal_target(daily: dict, consumed_by_meal: dict[str, dict], meal: str, meals_eaten: list[str] | None = None) -> dict:
     """
     How much is left to eat at `meal`, given what was already logged today.
 
@@ -183,6 +183,11 @@ def meal_target(daily: dict, consumed_by_meal: dict[str, dict], meal: str) -> di
     nothing logged you get dinner's 40% of the day, not the whole day. Anything already logged at
     this slot is subtracted again, so a half-logged lunch asks for the rest of lunch. Finally the
     macros are scaled so they never need more calories than the calorie target.
+
+    meals_eaten: the meals this user eats each day ("breakfast", "lunch", "dinner"); None for all
+    three. Only those count as still to come, so someone who skips lunch shares the day between
+    breakfast and dinner (25:40, about 38% and 62%) and gets bigger plates. The meal asked about always
+    counts, so a lunch eaten on a day off from the routine still gets its share.
     Returns {"target": ..., "meal_budget": ..., "consumed_this_meal": ..., "remaining_day": ...}.
     """
     key = meal.strip().lower()
@@ -202,7 +207,8 @@ def meal_target(daily: dict, consumed_by_meal: dict[str, dict], meal: str) -> di
             if other_slot is not None and any(nutrients[k] > 0 for k in NUTRIENTS):
                 logged_slots.add(other_slot)
 
-    pending = [s for s in SLOT_WEIGHT if s == slot or s not in logged_slots]
+    planned = {MEAL_SLOT[m] for m in meals_eaten} if meals_eaten else set(SLOT_WEIGHT)
+    pending = [s for s in SLOT_WEIGHT if s == slot or (s in planned and s not in logged_slots)]
     share = SLOT_WEIGHT[slot] / sum(SLOT_WEIGHT[s] for s in pending)
 
     budget, target = {}, {}
