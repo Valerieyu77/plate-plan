@@ -290,6 +290,20 @@ function todayBadge({ eaten, calorie_goal: goal }) {
 // -450 -> "−450", 120 -> "+120"
 const signed = (n) => (n == null ? '—' : `${n < 0 ? '−' : n > 0 ? '+' : ''}${Math.abs(n).toLocaleString()}`)
 
+// Within this many kcal of zero, the day's net reads "about even" (a maintain goal lands here)
+const EVEN_KCAL = 50
+
+// Where today's net ends up. `burned` is the whole day's burn, so eaten − burned read "−1,940 deficit" after
+// breakfast. Instead assume the user eats up to their goal: what is logged can only grow, so a day under the goal
+// ends at goal − burn (the plan), and a day already over it ends at least at eaten − burn. This never rewards
+// eating less than the goal with a bigger number. Returns {net, note}.
+function dayNet({ eaten, calorie_goal: goal, burned }) {
+  const over = (eaten ?? 0) > goal
+  const net = Math.round(Math.max(eaten ?? 0, goal) - burned)
+  const kind = Math.abs(net) < EVEN_KCAL ? 'About even' : net < 0 ? 'Deficit' : 'Surplus'
+  return { net, note: over ? `${kind} so far` : `${kind} at your goal` }
+}
+
 // Today's calories in and out. The backend only says "too_low" once a day is over, so the reminder to eat
 // enough checks yesterday.
 function TodayCalories({ userId }) {
@@ -313,7 +327,7 @@ function TodayCalories({ userId }) {
 
   const { today, yesterday } = state
   const [label, tone] = todayBadge(today)
-  const deficit = today.net != null && today.net < 0
+  const net = dayNet(today)
   return (
     <Card className="mb-6">
       <div className="flex items-center justify-between gap-3">
@@ -323,8 +337,9 @@ function TodayCalories({ userId }) {
 
       <div className="mt-4 grid grid-cols-3 gap-2 text-center">
         <Stat label="Eaten" value={big(today.eaten)} note={`of ${big(today.calorie_goal)} goal`} />
-        <Stat label="Burned" value={big(today.burned)} note={today.exercise > 0 ? `${big(today.exercise)} from workouts` : 'Body + activity'} />
-        <Stat label="Net" value={signed(today.net)} note={today.net == null ? 'Log a meal' : deficit ? 'Deficit' : 'Surplus'} />
+        {/* `burned` is an estimate for the whole day, not what has been burned by now */}
+        <Stat label="Burn today" value={big(today.burned)} note={today.exercise > 0 ? `Incl. ${big(today.exercise)} from workouts` : 'Estimate, whole day'} />
+        <Stat label="Day's net" value={signed(net.net)} note={net.note} />
       </div>
 
       {yesterday?.status === 'too_low' && (
