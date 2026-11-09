@@ -241,7 +241,16 @@ function TimelineSummary({ timeline: t }) {
       </div>
       {t.status !== 'reached' && (
         <p className="mt-2 text-muted">
-          By your last weigh-in the plan expected <span className="font-semibold text-ink">{t.expected_weight_lbs} lb</span>.{' '}
+          {/* With no weigh-in since the goal began, the timeline measures from the starting weight */}
+          {t.actual.length > 0 ? (
+            <>
+              By your last weigh-in the plan expected <span className="font-semibold text-ink">{t.expected_weight_lbs} lb</span>.{' '}
+            </>
+          ) : (
+            <>
+              No weigh-ins since you started this goal on {fmtDate(t.start_date)}. Log one below to see how you're doing.{' '}
+            </>
+          )}
           {Math.abs(t.remaining_lbs)} lb to go.
           {t.projected_finish_date && t.projected_finish_date > t.target_date && (
             <> At a safe pace you'll get there around {fmtDate(t.projected_finish_date)}.</>
