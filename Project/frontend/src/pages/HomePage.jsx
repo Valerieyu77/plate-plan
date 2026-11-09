@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { getEnergy, getEvents, getGoal, getHallPicks, getProgress } from '../api'
 import { GREAT_MIN, TIE } from '../components/HallPicks'
+import QuickAddButton from '../components/QuickAdd'
 import { Bar, ButtonLink, Card, Label, Loading, ProgressRing } from '../components/ui'
 import { GOALS, defaultGroup, todayISO } from '../constants'
 import { fmt, isoInDays, shortHall } from '../format'
@@ -308,6 +309,8 @@ function dayNet({ eaten, calorie_goal: goal, burned }) {
 // enough checks yesterday.
 function TodayCalories({ userId }) {
   const [state, setState] = useState({ userId: null })
+  const [version, setVersion] = useState(0) // goes up after a quick add, to reload the numbers
+  const [added, setAdded] = useState(null) // the food just added, for a short confirmation
 
   useEffect(() => {
     let ignore = false
@@ -318,7 +321,7 @@ function TodayCalories({ userId }) {
     return () => {
       ignore = true
     }
-  }, [userId])
+  }, [userId, version])
 
   if (state.userId !== userId) return null
   if (state.error) {
@@ -353,6 +356,22 @@ function TodayCalories({ userId }) {
           </span>
         </p>
       )}
+
+      {/* Food from outside the dining halls would otherwise be missing from every number above */}
+      <div className="mt-4 flex items-center justify-between gap-3 border-t border-line pt-3">
+        <p role="status" className="min-w-0 text-[13px] text-muted">
+          {added ? `Added ${added.name}, ${big(added.kcal)} kcal.` : "Ate something that isn't on a dining hall menu?"}
+        </p>
+        <QuickAddButton
+          userId={userId}
+          date={todayISO()}
+          onAdded={(log) => {
+            setAdded(log)
+            setVersion((v) => v + 1)
+          }}
+          className="shrink-0 rounded-lg bg-brand-soft px-3 py-1.5 text-sm font-semibold text-brand-deep transition-colors hover:bg-brand-soft/70"
+        />
+      </div>
     </Card>
   )
 }

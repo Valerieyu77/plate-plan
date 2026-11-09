@@ -160,6 +160,10 @@ export const getFoodLogs = (userId, date) => request(`/users/${userId}/food-logs
 export const addFoodLog = (userId, itemId, servings = 1) =>
   request(`/users/${userId}/food-logs`, { method: 'POST', body: { item_id: itemId, servings } })
 export const deleteFoodLog = (userId, logId) => request(`/users/${userId}/food-logs/${logId}`, { method: 'DELETE' })
+// Quick add: food that isn't on a dining hall menu (a snack, a meal off campus). `food` is {name, kcal, meal, date,
+// protein_g?, carbs_g?, fat_g?}; meal is breakfast, lunch, dinner or snack. It counts everywhere a menu dish does,
+// and comes back from getFoodLogs with item_id null and its own name and nutrients.
+export const quickAddFood = (userId, food) => request(`/users/${userId}/food-logs`, { method: 'POST', body: food })
 
 export const getWeightLogs = (userId) => request(`/users/${userId}/weight-logs`)
 // Remove a weigh-in (a typo, say). 204. The current weight goes back to the latest weigh-in left, and a
