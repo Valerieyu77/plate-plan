@@ -186,3 +186,44 @@ def test_events_endpoint_when_the_calendar_is_down(client, monkeypatch):
 
     monkeypatch.setattr(events, "fetch_events", down)
     assert client.get("/events").status_code == 503
+
+
+def test_today_is_in_progress_not_ahead(client):
+    from app.main import _today
+
+    uid = with_goal(client)
+    today = str(_today())
+    client.post(f"/users/{uid}/food-logs", json={"item_id": 1, "servings": 1, "date": today})  # just one meal so far
+    e = client.get(f"/users/{uid}/energy?date={today}").json()
+    assert e["status"] == "in_progress" and e["day_complete"] is False and e["eaten"] == 300
+    past = client.get(f"/users/{uid}/energy?date=2026-10-08").json()
+    assert past["day_complete"] is True and past["status"] == "not_logged"
+    p = client.get(f"/users/{uid}/goal/progress").json()
+    assert "once the day is over" in p["message"]
+
+
+def test_campus_today_is_chicago_time(monkeypatch):
+    from datetime import datetime, timezone
+
+    import app.main as main
+
+    class Late(datetime):  # 1:30 am UTC on Nov 9 is still the evening of Nov 8 in Illinois
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 11, 9, 1, 30, tzinfo=timezone.utc).astimezone(tz)
+
+    monkeypatch.setattr(main, "datetime", Late)
+    assert main._today() == date(2026, 11, 8)
+
+
+def test_a_plate_never_gets_more_than_two_servings_of_a_dish(client):
+    uid = with_goal(client, goal_type="gain")
+    for meal in ("lunch", "dinner"):
+        rec = client.get(f"/recommendations/meals?user_id={uid}&hall=Illinois Street Dining Center (ISR)&date={DAY}&meal={meal}").json()
+        assert all(l["servings"] <= 2 for l in rec["items"]), rec
+
+
+def test_servings_cap_is_two_even_for_a_big_meal():
+    from app.main import _servings_cap
+
+    assert _servings_cap({"kcal": 600}) == 2 and _servings_cap({"kcal": 1200}) == 2  # more dishes, not bigger heaps

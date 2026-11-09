@@ -18,15 +18,18 @@ FEED_URL = f"https://calendars.illinois.edu/icalGmail/{CALENDAR_ID}.ics?hourOffs
 CALENDAR_PAGE = f"https://calendars.illinois.edu/list/{CALENDAR_ID}"
 CACHE_SECONDS = 3600
 
-# Words that mark an event as exercise rather than, say, a flu shot clinic
+# Words in an event's title that mark it as exercise rather than, say, a flu shot clinic
 FITNESS_WORDS = [
     "fitness", "workout", "yoga", "pilates", "cycle", "cycling", "spin", "run", "5k", "walk", "swim", "aqua",
-    "skate", "climb", "boulder", "dance", "zumba", "hiit", "strength", "lift", "boxing", "kickbox", "martial",
-    "intramural", "tournament", "basketball", "volleyball", "soccer", "tennis", "pickleball", "badminton",
-    "hike", "bike", "barre", "bootcamp", "core", "stretch", "mobility", "arc", "crce", "skating", "freestyle",
-    "ice arena",
+    "skate", "skating", "climb", "boulder", "dance", "zumba", "hiit", "strength", "lift", "boxing", "kickbox",
+    "martial", "intramural", "tournament", "basketball", "volleyball", "soccer", "tennis", "pickleball",
+    "badminton", "hike", "bike", "barre", "bootcamp", "core", "stretch", "mobility",
 ]
+# Places where any public session is exercise (the Ice Arena's "Freestyle" is skating). A gym name like
+# ARC is not on the list: blood drives and study breaks are held there too.
+FITNESS_PLACES = ["ice arena", "pool"]
 _FITNESS = re.compile(r"\b(" + "|".join(FITNESS_WORDS) + r")\b", re.I)
+_FITNESS_PLACE = re.compile(r"\b(" + "|".join(FITNESS_PLACES) + r")\b", re.I)
 
 _cache: dict = {"at": 0.0, "events": None}
 
@@ -90,7 +93,7 @@ def parse_ics(text: str) -> list[dict]:
 
 
 def is_fitness(event: dict) -> bool:
-    return bool(_FITNESS.search(f"{event['title']} {event.get('location') or ''}"))
+    return bool(_FITNESS.search(event["title"]) or _FITNESS_PLACE.search(event.get("location") or ""))
 
 
 def fetch_events(now: float | None = None) -> list[dict]:

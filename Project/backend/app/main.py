@@ -1,7 +1,8 @@
 import inspect
 import logging
 from contextlib import asynccontextmanager
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from typing import Annotated
 
 import requests
@@ -12,7 +13,7 @@ from sqlmodel import Session, func, select
 from .auth import CurrentUserDep, OwnerOnly, create_token, hash_password, verify_password
 from .database import create_db_and_tables, get_session
 from .models import (
-    AuthResponse, FoodLog, FoodLogCreate, FoodLogPublic, Goal, GoalCreate, GoalPublic, LogIn, MenuItem,
+    AuthResponse, FoodLog, FoodLogCreate, FoodLogPublic, Goal, GoalCreate, GoalPublic, LogIn, MealsUpdate, MenuItem,
     MenuItemPublic, User, UserPublic, UserSignUp, WeightLog, WeightLogCreate, WeightLogPublic, WorkoutLog,
     WorkoutLogCreate, WorkoutLogPublic,
 )
@@ -50,6 +51,18 @@ app.add_middleware(
 
 # Endpoints that list this as a parameter get a database session automatically
 SessionDep = Annotated[Session, Depends(get_session)]
+
+# The app is for UIUC, so "today" is Champaign's date. The server runs in UTC, where an evening in
+# Illinois is already tomorrow, so date.today() would start goals and close days a day early.
+try:
+    CAMPUS_TZ = ZoneInfo("America/Chicago")
+except ZoneInfoNotFoundError:  # a system without time zone data
+    CAMPUS_TZ = None
+
+
+def _today() -> date:
+    """Today's date on campus (also usable in endpoints whose own `date` parameter hides the date class)."""
+    return datetime.now(CAMPUS_TZ).date() if CAMPUS_TZ else date.today()
 
 
 # ---------- Accounts ----------
@@ -97,6 +110,23 @@ def read_user(user_id: int, session: SessionDep):
     return user
 
 
+@app.put("/users/{user_id}/meals", response_model=UserPublic, dependencies=[OwnerOnly])
+def set_meals(user_id: int, body: MealsUpdate, session: SessionDep):
+    """
+    Which meals the user eats each day, e.g. {"meals": ["breakfast", "dinner"]}; null for all three.
+    The day's calories are then shared between those meals only, so skipping lunch makes breakfast
+    and dinner bigger (meal targets, recommendations and hall picks all follow).
+    """
+    user = session.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    user.meals = body.meals
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+    return user
+
+
 @app.get("/meals", response_model=list[str])
 def list_meals(hall: str, date: date, session: SessionDep, main_only: bool = False):
     """Meal values a hall serves on a date, for the meal dropdown (e.g. Ike has "light lunch", LAR has no breakfast).
@@ -140,7 +170,7 @@ def list_food_logs(user_id: int, date: date, session: SessionDep):
 
 def _plan_or_422(user: User, goal: GoalCreate) -> dict:
     try:
-        return plan_goal(user, goal.target_weight_lbs, goal.target_date)
+        return plan_goal(user, goal.target_weight_lbs, goal.target_date, _today())
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
@@ -180,14 +210,14 @@ def set_goal(user_id: int, goal: GoalCreate, session: SessionDep):
         tier = plan["tier"]
         timeline_fields = {
             "goal_type": plan["goal_type"], "target_weight_lbs": goal.target_weight_lbs, "target_date": goal.target_date,
-            "start_date": date.today(), "start_weight_lbs": user.weight_lbs, "weekly_rate_lbs": plan["weekly_rate_lbs"],
+            "start_date": _today(), "start_weight_lbs": user.weight_lbs, "weekly_rate_lbs": plan["weekly_rate_lbs"],
         }
         if tier == "aggressive" and not targets["warning"]:
             targets["warning"] = (f"{plan['weekly_rate_lbs']:.1f} lb a week is on the fast side. It is allowed, "
                                   "but a slower pace is easier to keep up.")
     else:
         try:
-            targets = daily_targets(user, goal.goal_type)
+            targets = daily_targets(user, goal.goal_type, _today())
         except ValueError as e:
             raise HTTPException(status_code=422, detail=str(e))
         timeline_fields = {"goal_type": goal.goal_type, "target_weight_lbs": None, "target_date": None,
@@ -218,7 +248,7 @@ def read_goal_timeline(user_id: int, session: SessionDep):
     if not goal or not goal.target_date:
         raise HTTPException(status_code=404, detail="No timeline goal set for this user")
     weights = session.exec(select(WeightLog).where(WeightLog.user_id == user_id).order_by(WeightLog.date, WeightLog.id)).all()
-    return timeline(goal, weights)
+    return timeline(goal, weights, _today())
 
 
 # ---------- Menus ----------
@@ -311,7 +341,7 @@ def create_weight_log(user_id: int, entry: WeightLogCreate, session: SessionDep)
     user = session.get(User, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    day = entry.date or date.today()
+    day = entry.date or _today()
     log = WeightLog(user_id=user_id, date=day, weight_lbs=entry.weight_lbs)
     session.add(log)
 
@@ -323,7 +353,7 @@ def create_weight_log(user_id: int, entry: WeightLogCreate, session: SessionDep)
         # A timeline goal's calories follow what is left to lose or gain in the time left
         goal = session.get(Goal, user_id)
         if goal and goal.target_date and goal.goal_type:
-            targets = replan(user, goal.goal_type, goal.target_weight_lbs, goal.target_date)
+            targets = replan(user, goal.goal_type, goal.target_weight_lbs, goal.target_date, _today())
             targets.pop("warning")
             for key, value in targets.items():
                 setattr(goal, key, value)
@@ -374,10 +404,11 @@ def read_meal_target(user_id: int, date: date, meal: str, session: SessionDep):
     """
     daily = _daily_targets_or_404(session, user_id)
     try:
-        result = meal_target(daily, _consumed_by_meal(session, user_id, date), meal)
+        result = meal_target(daily, _consumed_by_meal(session, user_id, date), meal, session.get(User, user_id).meals)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
-    return {"date": date, "meal": meal.strip().lower(), "daily_target": daily, **result}
+    return {"date": date, "meal": meal.strip().lower(), "daily_target": daily,
+            "meals_eaten": session.get(User, user_id).meals or list(GROUP_ORDER), **result}
 
 
 @app.get("/users/{user_id}/progress", dependencies=[OwnerOnly])
@@ -396,6 +427,17 @@ def read_progress(user_id: int, date: date, session: SessionDep):
 
 
 # ---------- Recommendations ----------
+
+# At most this many servings of one dish on a recommended plate: "3 servings of salad" (4.5 cups) is
+# not a meal anyone takes, so a bigger budget is filled with more dishes instead. Checked on the sample
+# menus for 1,000-1,250 kcal plates (someone who eats twice a day): with 2, calories still land within
+# 10% on 34-35 of 37 menus with about 4 dishes; 3 hit protein a little more often but put a dish at 3
+# servings on most plates.
+MAX_SERVINGS_PER_DISH = 2.0
+
+
+def _servings_cap(target: dict) -> float:
+    return MAX_SERVINGS_PER_DISH
 
 def _placeholder_recommendation(target: dict, items: list[MenuItem], note: str = "Placeholder: not optimised yet.") -> dict:
     """Stand-in used when recommend() is missing or fails: one serving of each real dish (skipping
@@ -445,7 +487,7 @@ def recommend_meal(user_id: int, hall: str, date: date, meal: str, session: Sess
     avoid_ids = [int(x) for x in (avoid or "").split(",") if x.strip().isdigit()]
     kwargs = {"avoid_ids": avoid_ids} if avoid_ids and "avoid_ids" in inspect.signature(recommend).parameters else {}
     try:
-        result = recommend(target, [item.model_dump() for item in items], **kwargs)
+        result = recommend(target, [item.model_dump() for item in items], max_servings=_servings_cap(target), **kwargs)
     except NotImplementedError:
         return _placeholder_recommendation(target, items)
     except Exception:
@@ -486,8 +528,8 @@ def hall_picks(user_id: int, date: date, meal: str, session: SessionDep):
         items = list_menu_items(hall, date, session, meal=chosen, user_id=user_id)
         dishes = [item.model_dump() for item in items]
         try:
-            tray = recommend(target, dishes)
-            protein_plate = recommend(high_protein_target(target["kcal"]), dishes)
+            tray = recommend(target, dishes, max_servings=_servings_cap(target))
+            protein_plate = recommend(high_protein_target(target["kcal"]), dishes, max_servings=_servings_cap(target))
         except Exception:
             log.exception("hall-picks: recommend() failed for %s", hall)
             continue
@@ -514,11 +556,6 @@ def hall_picks(user_id: int, date: date, meal: str, session: SessionDep):
 
 
 # ---------- Exercises and workout plans ----------
-
-def _today() -> date:
-    """Today's date, for endpoints whose own `date` parameter hides the date class."""
-    return date.today()
-
 
 def _user_or_404(session: Session, user_id: int) -> User:
     user = session.get(User, user_id)
@@ -663,19 +700,26 @@ def read_energy(user_id: int, date: date, session: SessionDep):
     One day's calories in and out: eaten, the daily burn (adjusted to the user's weigh-ins once there
     is enough data), workouts, the net, and how the day compares with the plan (status "ahead",
     "on_track", "behind", or "over"/"under" for maintain; "not_logged" with no food logged;
-    "too_low" for a past day under the safe calorie minimum).
+    "too_low" for a past day under the safe calorie minimum). Today isn't over, so its status is
+    "in_progress" (the numbers are what was logged so far) and day_complete is false.
     """
     user, goal, days, _, burn, calibration = _energy_context(session, user_id, date)
     d = days.get(date, {"eaten": None, "exercise": 0.0})
     workouts = session.exec(select(WorkoutLog).where(WorkoutLog.user_id == user_id, WorkoutLog.date == date)
                             .order_by(WorkoutLog.id)).all()
+    complete = date < _today()
+    # Today isn't over, so only a past day can count as under the minimum
+    balance = energy.day_balance(goal.goal_type, goal.calorie_goal, burn, d["eaten"], d["exercise"],
+                                 calorie_floor(user) if complete else None)
+    if not complete and balance["status"] != "not_logged":
+        # A half-logged day would read as "ahead" every evening; say it is still going instead
+        balance["status"] = "in_progress"
     return {
         "date": date,
         "goal_type": goal.goal_type,
         "calorie_goal": goal.calorie_goal,
-        # Today isn't over, so only a past day can count as under the minimum
-        **energy.day_balance(goal.goal_type, goal.calorie_goal, burn, d["eaten"], d["exercise"],
-                             calorie_floor(user) if date < _today() else None),
+        **balance,
+        "day_complete": complete,
         "workouts": [WorkoutLogPublic.model_validate(w) for w in workouts],
         "burn_adjusted": calibration["factor"] != 1.0,
     }
@@ -706,7 +750,8 @@ def read_goal_progress(user_id: int, session: SessionDep, date: date | None = No
         "goal_type": goal.goal_type,
         "target_date": goal.target_date,
         **progress,
-        "message": energy.progress_message(progress, goal.goal_type),
+        "message": energy.progress_message(progress, goal.goal_type,
+                                           today_logged=(days.get(today) or {}).get("eaten") is not None),
         "weight": estimate,
         "scale": scale,
         "calibration": calibration,

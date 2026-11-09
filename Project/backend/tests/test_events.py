@@ -83,3 +83,11 @@ def test_fetch_uses_the_cache_and_falls_back_to_it_when_the_server_is_down(monke
     monkeypatch.setattr(events, "_cache", {"at": 0.0, "events": None})
     with pytest.raises(requests.RequestException):
         events.fetch_events(now=1)
+
+
+def test_a_gym_name_alone_does_not_make_an_event_exercise():
+    blood_drive = {"title": "Annual Deterding Blood Drive", "location": "ARC MP6"}
+    party = {"title": "Well-O-Ween", "location": "ARC Well-Being Lounge"}
+    skating = {"title": "Freestyle", "location": "Ice Arena 406 E. Armory Ave."}
+    assert not events.is_fitness(blood_drive) and not events.is_fitness(party)
+    assert events.is_fitness(skating) and events.is_fitness({"title": "Spin Class", "location": "ARC"})

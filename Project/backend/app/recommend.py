@@ -189,7 +189,8 @@ def recommend(target: dict, items: list[dict], max_servings: float = 3.0, avoid_
 
 WORKOUT_FOCUS = {"lose": "cardio", "maintain": "mixed", "gain": "strength"}
 WORKOUT_MINUTES = {"light": 20, "moderate": 35, "hard": 50}
-SURPLUS_KCAL = 200  # this far over or under the calorie goal gets a note
+SURPLUS_KCAL = 200     # this far over the calorie goal gets a note
+LOW_FUEL_SHARE = 0.25  # having logged less than this share of the goal so far gets a "have a snack" note
 
 
 def recommend_workout(goal_type: str, calorie_goal: float, kcal_eaten: float, intensity: str | None = None,
@@ -222,9 +223,10 @@ def recommend_workout(goal_type: str, calorie_goal: float, kcal_eaten: float, in
     balance = kcal_eaten - calorie_goal  # > 0 means over the goal
     if balance > SURPLUS_KCAL:
         note = f"You have eaten {balance:.0f} kcal more than your goal today. A workout helps, but you don't need to burn it off."
-    elif balance < -SURPLUS_KCAL and kcal_eaten > 0:
-        # Training hard on an empty tank is a bad idea, and someone trying to gain needs those calories
-        note = f"You are {-balance:.0f} kcal under your goal so far. Eat something first, especially before a hard session."
+    elif 0 < kcal_eaten < LOW_FUEL_SHARE * calorie_goal:
+        # Training hard on an empty tank is a bad idea. Being under the goal at, say, dinner time is
+        # normal (the day isn't over), so only a really low intake so far gets the reminder.
+        note = f"You have only logged {kcal_eaten:.0f} kcal today. Have a snack first if you feel low on energy, especially before a hard session."
     else:
         note = None
 

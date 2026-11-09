@@ -102,3 +102,21 @@ def test_bad_choices_are_refused(kwargs):
     args = {"focus": "mixed", "intensity": "moderate", "minutes": 30, **kwargs}
     with pytest.raises(ValueError):
         build_plan(args.pop("focus"), **args)
+
+
+@pytest.mark.parametrize("muscles, minutes", [(["legs"], 35), (["legs", "glutes"], 45), (["arms"], 60), (["back"], 30)])
+def test_one_group_gets_different_movements_not_three_kinds_of_squat(muscles, minutes):
+    from app.workout import MAX_PER_GROUP
+
+    plan = build_plan("strength", "moderate", minutes, 150, muscles=muscles, seed="2026-11-08")
+    strength = [BY_ID[l["id"]] for l in plan["exercises"] if l["kind"] == "strength"]
+    patterns = [e["pattern"] for e in strength]
+    assert len(patterns) == len(set(patterns)), patterns
+    assert len(strength) <= MAX_PER_GROUP * len(muscles)
+    assert plan["minutes"] >= 0.7 * minutes  # the time goes into extra sets or a short finisher instead
+
+
+def test_a_strength_finisher_is_a_gym_machine_not_the_pool():
+    for seed in range(20):
+        plan = build_plan("strength", "moderate", 60, 150, muscles=["arms"], seed=str(seed))
+        assert all(l["id"] != "swim" for l in plan["exercises"])
