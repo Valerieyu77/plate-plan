@@ -76,8 +76,8 @@ export default function App() {
     if (isNew) return navigate('/goal')
     try {
       await getGoal(u.id)
-      // Signed out, Plan, Goal and Progress show this form too: after logging in, stay on the page they asked for
-      navigate(['/plan', '/goal', '/progress'].includes(route) ? route : '/')
+      // Signed out, every tab but Home shows this form: after logging in, stay on the page they asked for
+      navigate(TABS.some(([path]) => path === route) ? route : '/')
     } catch {
       navigate('/goal')
     }
