@@ -3,7 +3,7 @@ import { addFoodLog, deleteFoodLog, getFoodLogs, getHalls, getMealOptions, getMe
 import HallPicks from '../components/HallPicks'
 import { Button, Card, ChipScroller, DateChip, ErrorNote, Input, Label, Loading, PageHeader, ProgressRing } from '../components/ui'
 import { ALLERGIES, MEAL_GROUPS, defaultGroup, todayISO } from '../constants'
-import { fmt, mealLabel, shortHall } from '../format'
+import { fmt, fmtDate, mealLabel, shortHall } from '../format'
 import { getPrefs, setPrefs } from '../session'
 
 
@@ -339,7 +339,7 @@ export default function PlanPage({ user, onSetGoal }) {
 
       {current && !current.error && (
         <div className="space-y-4">
-          <MealTargetCard target={current.target} meal={meal} group={groupPick} onSetGoal={onSetGoal} />
+          <MealTargetCard target={current.target} meal={meal} day={date === todayISO() ? 'today' : `on ${fmtDate(date)}`} onSetGoal={onSetGoal} />
           {current.rec && (
             <RecommendationCard
               rec={current.rec}
@@ -518,7 +518,25 @@ function ServingStepper({ name, servings, busy, onChange }) {
   )
 }
 
-function MealTargetCard({ target, meal, group, onSetGoal }) {
+// Where this meal's budget comes from, in one sentence. The budget is a share of what the day has left after the
+// other meals logged that day, so measuring it against the whole day ("Lunch gets 33% of today's 2000 kcal") read
+// as a third of the day when it was half of what was left. `day` is "today" or "on Nov 12".
+function budgetNote(target, day) {
+  const daily = target.daily_target.kcal
+  const budget = target.meal_budget.kcal
+  if (!daily) return null
+  // The day reached its target: remaining_day stops at 0, so what is left can't be worked out (or matter)
+  if (target.remaining_day.kcal <= 0) return `You have reached ${day === 'today' ? "today's" : `the day's`} ${fmt(daily)} kcal.`
+  // What the day had left for this meal and the ones still to come: the day minus the other meals logged
+  const leftForRest = target.remaining_day.kcal + target.consumed_this_meal.kcal
+  const pct = Math.round((100 * budget) / leftForRest)
+  // Values come rounded to 0.1 kcal, so allow for that when asking whether other meals were logged
+  if (leftForRest >= daily - 1) return `${Math.round((100 * budget) / daily)}% of your ${fmt(daily)} kcal day, shared with the meals still to come.`
+  if (pct >= 100) return `All of the ${fmt(leftForRest)} kcal left after your other meals ${day}.`
+  return `${pct}% of the ${fmt(leftForRest)} kcal left after your other meals ${day}; the rest is for the meals still to come.`
+}
+
+function MealTargetCard({ target, meal, day, onSetGoal }) {
   if (target.missingGoal) {
     return (
       <Card>
@@ -534,7 +552,7 @@ function MealTargetCard({ target, meal, group, onSetGoal }) {
   const budget = target.meal_budget
   return (
     <Card className="flex items-center gap-5">
-      <ProgressRing value={eaten.kcal} max={budget.kcal} size={120} stroke={11} label={`${fmt(eaten.kcal)} of ${fmt(budget.kcal)} kcal logged for ${meal} today, at any hall`}>
+      <ProgressRing value={eaten.kcal} max={budget.kcal} size={120} stroke={11} label={`${fmt(eaten.kcal)} of ${fmt(budget.kcal)} kcal logged for ${meal} ${day}, at any hall`}>
         <p className="text-2xl leading-none font-bold">{fmt(left.kcal)}</p>
         <p className="mt-1 text-[11px] font-medium text-muted">kcal left</p>
       </ProgressRing>
@@ -542,12 +560,10 @@ function MealTargetCard({ target, meal, group, onSetGoal }) {
         <p className="text-[13px] font-semibold text-brand">
           {mealLabel(meal)} budget: {fmt(budget.kcal)} kcal
         </p>
+        <p className="mt-0.5 text-[13px] text-muted">{budgetNote(target, day)}</p>
         {/* consumed_this_meal counts this meal at every hall, so say so */}
-        <p className="mt-0.5 text-[13px] text-muted">
-          {mealLabel(group)} gets {Math.round((100 * budget.kcal) / target.daily_target.kcal)}% of today's {fmt(target.daily_target.kcal)} kcal, after what you have already logged.
-        </p>
         <p className="mt-1 text-sm text-muted">
-          Logged for {meal} today (any hall): <span className="font-medium text-ink">{fmt(eaten.kcal)} kcal</span>
+          Logged for {meal} {day} (any hall): <span className="font-medium text-ink">{fmt(eaten.kcal)} kcal</span>
         </p>
         <dl className="mt-3 grid grid-cols-3 gap-2 text-center">
           {[
