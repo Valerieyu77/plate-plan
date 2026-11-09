@@ -78,9 +78,15 @@ export default function ProgressPage({ user, onSetGoal }) {
     }
   }
 
+  const dayLabel = date === todayISO() ? "Today's food" : `Food on ${fmtDate(date)}`
+
   return (
     <section>
-      <PageHeader title="Progress" sub="Today's food against your targets, and your weight trend." action={<DateChip value={date} onChange={setDate} />} />
+      <PageHeader
+        title="Progress"
+        sub={`${dayLabel} against your targets, and your weight trend.`}
+        action={<DateChip value={date} onChange={setDate} />}
+      />
 
       {!current && <Loading />}
       {current?.error && <ErrorNote>{current.error.message}</ErrorNote>}
@@ -160,7 +166,7 @@ export default function ProgressPage({ user, onSetGoal }) {
                 <ul className="divide-y divide-line text-sm">
                   {[...progress.weight_trend].reverse().slice(0, 7).map((w, i) => (
                     <li key={`${w.date}-${i}`} className="flex justify-between py-2.5">
-                      <span className="text-muted">{w.date}</span>
+                      <span className="text-muted">{fmtDate(w.date)}</span>
                       <span className="font-semibold">{w.weight_lbs} lb</span>
                     </li>
                   ))}
@@ -317,11 +323,11 @@ function WeightChart({ points, planned = [], target }) {
           </g>
         ))}
         <text x={pad.left} y={H - 6} className="fill-muted text-[11px]">
-          {first.date}
+          {fmtDate(first.date)}
         </text>
         {last.date !== first.date && (
           <text x={W - pad.right} y={H - 6} textAnchor="end" className="fill-muted text-[11px]">
-            {last.date}
+            {fmtDate(last.date)}
           </text>
         )}
 
@@ -364,7 +370,7 @@ function WeightChart({ points, planned = [], target }) {
           className="pointer-events-none absolute -translate-x-1/2 -translate-y-full rounded-lg bg-ink px-2.5 py-1 text-[12px] font-medium whitespace-nowrap text-white shadow-lg"
           style={{ left: `${(active.cx / W) * 100}%`, top: `${(active.cy / H) * 100}%`, marginTop: -10 }}
         >
-          {active.date} · {active.weight_lbs} lb
+          {fmtDate(active.date)} · {active.weight_lbs} lb
         </div>
       )}
     </div>
