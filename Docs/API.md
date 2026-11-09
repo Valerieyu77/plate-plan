@@ -55,6 +55,7 @@ Create an account. Returns `201` with `{"token": "...", "user": {...}}` (the use
 - `dietary_restrictions`: vegetarian, vegan, kosher, halal, jain, no pork, no alcohol, no gelatin. (See `app/dietary.py`.)
 - `activity_level` (optional, default `light`): one of `sedentary`, `light`, `moderate`, `active`, `very_active`. Anything else gets `422`.
 - `meals` (optional, default `null` = all three): which meals the user eats each day, any of `breakfast`, `lunch`, `dinner`. Returned cleaned up, in day order. Change it later with `PUT /users/{id}/meals`.
+- `birthdate`: users must be 16 or older (on today's campus date); a younger birthdate gets `422 "Plate Plan is for people 16 and older."`. The calorie formula is made for adults.
 
 ### `POST /auth/login` ✅
 `{"email": "...", "password": "..."}` → `{"token": "...", "user": {...}}`. Returns `401 "Incorrect email or password"` for a wrong password or an unknown email alike. Accounts made before login existed have no password and can't log in; sign up again.

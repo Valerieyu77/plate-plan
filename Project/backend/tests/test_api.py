@@ -96,6 +96,18 @@ def test_sign_up_errors(client):
     assert client.post("/auth/signup", json=PROFILE).status_code == 422  # no password
 
 
+def test_sign_up_needs_to_be_16_or_older(client, monkeypatch):
+    from datetime import date
+
+    import app.main as main
+
+    monkeypatch.setattr(main, "_today", lambda: date(2026, 11, 9))
+    young = client.post("/auth/signup", json={**PROFILE, "password": PASSWORD, "birthdate": "2010-11-10"})
+    assert young.status_code == 422 and "16" in young.json()["detail"]  # 16 tomorrow
+    assert client.post("/auth/signup", json={**PROFILE, "password": PASSWORD, "birthdate": "2030-01-01"}).status_code == 422
+    assert client.post("/auth/signup", json={**PROFILE, "password": PASSWORD, "birthdate": "2010-11-09"}).status_code == 201
+
+
 def test_wrong_password_and_unknown_email_look_the_same(client):
     make_user(client)
     wrong = client.post("/auth/login", json={"email": PROFILE["email"], "password": "nope nope"})

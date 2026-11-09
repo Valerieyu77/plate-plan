@@ -32,6 +32,10 @@ DEFAULT_MIN_CALORIES = 1350
 
 REQUIRED_FIELDS = ["weight_lbs", "height_in", "gender", "birthdate"]
 
+# The youngest age the app is for: the Mifflin-St Jeor formula behind daily_targets() is made for adults.
+# The sign-up form has the same limit (MIN_AGE in frontend/src/pages/AuthPage.jsx).
+MIN_AGE = 16
+
 
 def age_from_birthdate(birthdate: date, today: date | None = None) -> int:
     today = today or date.today()
