@@ -8,6 +8,7 @@ Base URL: `http://127.0.0.1:8000` locally. Interactive docs: `/docs`.
 
 ## Conventions
 - JSON everywhere. Dates are ISO strings: `"2026-10-08"`. "Today" is the date in Champaign (America/Chicago), not the server's UTC date, so an Illinois evening isn't already tomorrow.
+- Food logs, weigh-ins and workouts can be dated today or up to 7 days back, so a forgotten meal can be filled in later. A date after today gets `422` "... can't be logged for a future date"; one more than 7 days ago gets `422` "... can only be logged for the last 7 days". That includes a dish from a future or old menu logged without a `date`. Deleting an older log still works.
 - Units: weight in **lbs**, height in **inches**, nutrients in **g** (sodium in mg), energy in **kcal**.
 - All nutrient values on a menu item are **per ONE serving**.
 - Login: `POST /auth/signup` and `POST /auth/login` return `{token, user}`. Send the token on every request as `Authorization: Bearer <token>`. Every `/users/{id}/...` endpoint, and `user_id=` on `/menu-items` and `/recommendations/meals`, only accepts that user's own token. Tokens last 30 days.
