@@ -25,6 +25,7 @@ Status: ✅ built and merged, 🟡 build with mock data first, ⬜ not started.
 | Set a goal (steady pace or target weight + date), get daily targets | `POST /users/{id}/goal/preview` ✅, `PUT /users/{id}/goal` ✅ |
 | Choose which meals you eat each day (e.g. skip lunch) | `PUT /users/{id}/meals` ✅ (or `meals` at sign-up) |
 | Pick a meal first, then a hall that serves it | `GET /halls?meal=` ✅, `GET /meal-options` ✅ |
+| Star the halls you usually eat at | `PATCH /users/{id}` with `favorite_halls` ✅ |
 | See this meal's target and the dishes the user can eat | `GET /users/{id}/meal-target` ✅, `GET /menu-items?user_id=` ✅ |
 | Get recommended dishes for that meal | `GET /recommendations/meals` 🟡 (D) |
 | Check off / un-check what was eaten | `POST` ✅ and `DELETE /users/{id}/food-logs` ✅ |
@@ -74,12 +75,13 @@ Not built: resetting a forgotten password by email (needs an email service and o
 Returns the same shape as above plus `id`.
 
 ### `PATCH /users/{id}` ✅
-Edit the profile. Send only what changes, any of: `name`, `height_in`, `gender`, `birthdate`, `activity_level`, `allergies`, `dietary_restrictions`, `meals` (to clear a list, send `[]`). Returns the user.
+Edit the profile. Send only what changes, any of: `name`, `height_in`, `gender`, `birthdate`, `activity_level`, `allergies`, `dietary_restrictions`, `meals`, `favorite_halls` (to clear a list, send `[]`). Returns the user.
 ```json
 { "allergies": ["Milk", "Peanuts"], "activity_level": "active" }
 ```
 - Allergies and diet change the dishes shown and recommended right away.
 - A change to height, sex, birthday or activity level recalculates the goal's daily targets (a timeline goal is replanned for the time left).
+- `favorite_halls`: the starred dining halls, by full name as `GET /halls` lists them (e.g. `"Illinois Street Dining Center (ISR)"`), in the order starred; at most 10. Blanks and repeats are dropped. `null` (the default) means none. The Plan page lists starred halls first and opens on the first one serving the meal.
 - `email` and `weight_lbs` are ignored here: the email is the login, and weight changes go through weigh-ins so the history stays right.
 - `422` for an unknown activity level, a non-positive height, an empty `meals`, or `null` for name, height, sex, birthday or activity.
 
@@ -251,7 +253,7 @@ Or **quick-add** anything else (a snack, a meal off campus): a `name` and `kcal`
 Returns `201`: `{ "id", "user_id", "date", "meal", "servings", "item_id", "name", "kcal", "protein_g", "carbs_g", "fat_g" }` (the last five are set only for a quick add, as the whole entry's nutrition). Quick adds count everywhere a menu dish does: progress, meal targets, energy, goal progress. A `snack` comes off the day without taking a breakfast, lunch or dinner slot; macros left out count as 0. `404` if user or item is missing; `422` if `servings <= 0`, a quick add misses its name or kcal (0 < kcal ≤ 5000), or both `item_id` and quick-add fields are sent.
 
 ### `GET /users/{id}/food-logs?date=` ✅
-That day's logs, same shape as above, as a list.
+That day's logs, same shape as above, as a list. A menu dish also comes back with its `name`, `hall` and nutrients (`kcal`, `protein_g`, `carbs_g`, `fat_g`) for the servings logged, so the day can be listed without looking each dish up; a quick add has `hall: null`.
 
 ### `DELETE /users/{id}/food-logs/{log_id}` ✅
 Un-check a dish. `204`, or `404` if the log doesn't exist or belongs to another user.

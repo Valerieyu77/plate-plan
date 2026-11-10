@@ -118,7 +118,7 @@ export default function App() {
   else if (route === '/progress') page = <ProgressPage user={user} onSetGoal={() => navigate('/goal')} />
   else if (route === '/workout') page = <WorkoutPage user={user} />
   else if (route === '/settings') page = <SettingsPage user={user} onUserChange={setUser} onDeleted={logOut} />
-  else page = <PlanPage user={user} onSetGoal={() => navigate('/goal')} />
+  else page = <PlanPage user={user} onUserChange={setUser} onSetGoal={() => navigate('/goal')} />
 
   const inApp = user && !restoring && !authTab
 

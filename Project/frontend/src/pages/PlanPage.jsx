@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { addFoodLog, deleteFoodLog, getFoodLogs, getHalls, getMealOptions, getMealTarget, getMenuItems, getRecommendations } from '../api'
+import { addFoodLog, deleteFoodLog, getFoodLogs, getHalls, getMealOptions, getMealTarget, getMenuItems, getRecommendations, updateProfile } from '../api'
+import AddedFoodCard from '../components/AddedFood'
 import HallPicks from '../components/HallPicks'
 import QuickAddButton from '../components/QuickAdd'
 import { Button, Card, ChipScroller, DateChip, ErrorNote, Input, Label, Loading, PageHeader, ProgressRing } from '../components/ui'
@@ -47,10 +48,13 @@ async function loadMealTarget(userId, date, meal) {
   }
 }
 
-export default function PlanPage({ user, onSetGoal }) {
+export default function PlanPage({ user, onUserChange, onSetGoal }) {
   const [date, setDate] = useState(todayISO())
   const [groupPick, setGroupPick] = useState(() => defaultGroup(user.meals))
-  const [hallPick, setHallPick] = useState(() => getPrefs(user.id).hall || null)
+  // The hall tapped on this visit. Until there is one, open on a starred hall, then the last one used.
+  const [hallPick, setHallPick] = useState(null)
+  const [favBusy, setFavBusy] = useState(false)
+  const [favError, setFavError] = useState('')
   const [optionPick, setOptionPick] = useState(null)
   const [halls, setHalls] = useState({ key: null })
   const [options, setOptions] = useState({ key: null })
@@ -79,8 +83,17 @@ export default function PlanPage({ user, onSetGoal }) {
       ignore = true
     }
   }, [hallsKey, date, groupPick])
-  const hallList = halls.key === hallsKey ? halls.list : null
-  const hall = hallList ? (hallList.includes(hallPick) ? hallPick : hallList[0] || null) : null
+  const favorites = useMemo(() => user.favorite_halls || [], [user.favorite_halls])
+  const favSet = useMemo(() => new Set(favorites), [favorites])
+  // Starred halls first (in the order starred), then the usual order
+  const hallList = useMemo(() => {
+    if (halls.key !== hallsKey) return null
+    const starred = favorites.filter((h) => halls.list.includes(h))
+    return [...starred, ...halls.list.filter((h) => !favSet.has(h))]
+  }, [halls, hallsKey, favorites, favSet])
+  const hall = hallList
+    ? [hallPick, ...favorites, getPrefs(user.id).hall].find((h) => h && hallList.includes(h)) || hallList[0] || null
+    : null
 
   // 2. Which menus that hall has for this meal. More than one (light lunch / lunch) means ask.
   const optionsKey = hall ? `${hall}|${date}` : null
@@ -173,6 +186,22 @@ export default function PlanPage({ user, onSetGoal }) {
     setHallPick(h)
     setPrefs(user.id, { hall: h })
   }
+
+  // Star or unstar a hall. Saved to the account, so it follows the user to other devices.
+  async function toggleFavorite(h) {
+    const next = favSet.has(h) ? favorites.filter((f) => f !== h) : [...favorites, h]
+    setFavBusy(true)
+    setFavError('')
+    try {
+      onUserChange(await updateProfile(user.id, { favorite_halls: next }))
+      setHallPick(h) // stay on this hall even if it is no longer the first starred one
+    } catch (err) {
+      setFavError(err.message)
+    } finally {
+      setFavBusy(false)
+    }
+  }
+  const hallLabel = (h) => (favSet.has(h) ? `★ ${shortHall(h)}` : shortHall(h))
 
   // The trays already shown, so "Show me another" can tell when it has run out. `reset` starts a new list.
   function rememberTray(rec, reset = false) {
@@ -308,9 +337,27 @@ export default function PlanPage({ user, onSetGoal }) {
               No dining hall has {groupPick} on this date. Menus are published about two weeks ahead, so try another day or meal.
             </Card>
           ) : (
-            <ChipScroller label="Dining hall" options={hallList} value={hall} onChange={pickHall} getLabel={shortHall} />
+            <ChipScroller label="Dining hall" options={hallList} value={hall} onChange={pickHall} getLabel={hallLabel} />
           )}
-          {hall && shortHall(hall) !== hall && <p className="mt-1.5 text-[13px] text-muted">{hall}</p>}
+          {hall && (
+            <div className="mt-1.5 flex items-center justify-between gap-3">
+              <p className="min-w-0 truncate text-[13px] text-muted">{shortHall(hall) !== hall ? hall : ''}</p>
+              <button
+                type="button"
+                onClick={() => toggleFavorite(hall)}
+                disabled={favBusy}
+                aria-pressed={favSet.has(hall)}
+                className={`shrink-0 text-[13px] font-semibold disabled:opacity-50 ${favSet.has(hall) ? 'text-brand' : 'text-muted hover:text-ink'}`}
+              >
+                {favSet.has(hall) ? '★ Favorite' : '☆ Add to favorites'}
+              </button>
+            </div>
+          )}
+          {favError && (
+            <div className="mt-2">
+              <ErrorNote>{favError}</ErrorNote>
+            </div>
+          )}
         </div>
 
         {hall && (
@@ -335,7 +382,7 @@ export default function PlanPage({ user, onSetGoal }) {
 
       {hall && (
         <div className="mt-5">
-          <HallPicks userId={user.id} date={date} group={groupPick} hall={hall} onPickHall={pickHall} version={logVersion} />
+          <HallPicks userId={user.id} date={date} group={groupPick} hall={hall} favorites={favSet} onPickHall={pickHall} version={logVersion} />
         </div>
       )}
 
@@ -431,6 +478,16 @@ export default function PlanPage({ user, onSetGoal }) {
           </div>
         </div>
       )}
+
+      {/* The whole day, every hall and meal, so a dish logged by mistake elsewhere can be found and removed */}
+      <div className="mt-6">
+        <AddedFoodCard
+          userId={user.id}
+          date={date}
+          version={logVersion}
+          onChanged={() => menuKey && reloadAfterLogging({ refreshRec: true }).catch((err) => setActionError(err.message))}
+        />
+      </div>
 
       <LoggedBar count={checkedTotal.count} kcal={checkedTotal.kcal} flash={flash} />
     </section>
