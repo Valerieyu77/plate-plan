@@ -6,7 +6,8 @@ export const ALLERGIES = [
   'Sesame', 'Corn', 'Coconut', 'Sulfites', 'MSG', 'Red Dye',
 ]
 
-// The calorie formula (Mifflin-St Jeor) is made for adults; children and young teens need a doctor's advice instead
+// The calorie formula (Mifflin-St Jeor) is made for adults; children and young teens need a doctor's advice instead.
+// The backend refuses younger sign-ups and profile edits too (MIN_AGE in app/nutrition.py, keep in sync).
 export const MIN_AGE = 16
 
 // The latest birthday allowed: MIN_AGE years before today, local time (Feb 29 becomes Feb 28)

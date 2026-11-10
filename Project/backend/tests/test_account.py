@@ -124,6 +124,7 @@ def test_editing_body_or_activity_recalculates_the_goal(client):
 
 @pytest.mark.parametrize("body", [
     {"activity_level": "couch potato"}, {"height_in": 0}, {"meals": []}, {"name": ""}, {"activity_level": None},
+    {"birthdate": "2030-01-01"},  # younger than MIN_AGE
 ])
 def test_bad_profile_edits_are_refused(client, body):
     uid = make_user(client)

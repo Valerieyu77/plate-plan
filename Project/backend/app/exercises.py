@@ -209,12 +209,14 @@ EXERCISES += [
      "tip": "Stretch to mild tension, never to pain."},
 ]
 
-# The movement each strength move trains, so a plan doesn't stack three kinds of squat
+# The movement each strength move trains, so a plan doesn't stack three kinds of squat. Pulling down
+# and rowing are different movements, like pressing overhead and pushing forward, so a back session
+# can have a pulldown and a row.
 PATTERNS = {
     "goblet-squat": "squat", "back-squat": "squat", "leg-press": "squat", "bodyweight-squat": "squat",
     "lunges": "lunge", "step-up": "lunge", "rdl": "hinge", "glute-bridge": "hinge",
     "push-up": "push", "db-bench": "push", "chest-press": "push",
-    "lat-pulldown": "pull", "cable-row": "pull", "db-row": "pull",
+    "lat-pulldown": "pulldown", "cable-row": "row", "db-row": "row",
     "shoulder-press": "press", "lateral-raise": "raise", "biceps-curl": "curl", "triceps-pushdown": "extension",
     "plank": "hold", "dead-bug": "hold", "knee-raise": "crunch",
 }

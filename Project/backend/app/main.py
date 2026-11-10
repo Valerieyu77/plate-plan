@@ -29,6 +29,7 @@ from .nutrition import (
 )
 from . import energy, events
 from .exercises import BY_ID as EXERCISES_BY_ID, EXERCISES, MUSCLES, kcal_burned, video_url
+from .nutrition import MIN_AGE, age_from_birthdate
 
 log = logging.getLogger(__name__)
 
@@ -75,7 +76,10 @@ def _user_by_email(session: Session, email: str) -> User | None:
 
 @app.post("/auth/signup", response_model=AuthResponse, status_code=201)
 def sign_up(body: UserSignUp, session: SessionDep):
-    """Create an account. Returns a login token and the user; 409 if the email is taken."""
+    """Create an account. Returns a login token and the user; 409 if the email is taken, 422 if the
+    user is younger than MIN_AGE (the sign-up form checks this too)."""
+    if body.birthdate and age_from_birthdate(body.birthdate, _today()) < MIN_AGE:
+        raise HTTPException(status_code=422, detail=f"Plate Plan is for people {MIN_AGE} and older.")
     if _user_by_email(session, body.email):
         raise HTTPException(status_code=409, detail="A user with this email already exists")
 
@@ -160,6 +164,8 @@ def update_profile(user_id: int, body: ProfileUpdate, session: SessionDep):
     for field in ("name", "height_in", "gender", "birthdate", "activity_level"):
         if field in changes and changes[field] is None:
             raise HTTPException(status_code=422, detail=f"{field} can't be removed, only changed")
+    if changes.get("birthdate") and age_from_birthdate(changes["birthdate"], _today()) < MIN_AGE:
+        raise HTTPException(status_code=422, detail=f"Plate Plan is for people {MIN_AGE} and older.")
     for key, value in changes.items():
         setattr(user, key, value)
     session.add(user)
