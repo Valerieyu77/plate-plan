@@ -116,6 +116,13 @@ def test_one_group_gets_different_movements_not_three_kinds_of_squat(muscles, mi
     assert plan["minutes"] >= 0.7 * minutes  # the time goes into extra sets or a short finisher instead
 
 
+def test_a_back_session_has_a_pulldown_and_a_row():
+    for seed in range(20):
+        plan = build_plan("strength", "moderate", 45, 150, muscles=["back"], seed=str(seed))
+        ids = {l["id"] for l in plan["exercises"]}
+        assert "lat-pulldown" in ids and ids & {"cable-row", "db-row"}, ids
+
+
 def test_a_strength_finisher_is_a_gym_machine_not_the_pool():
     for seed in range(20):
         plan = build_plan("strength", "moderate", 60, 150, muscles=["arms"], seed=str(seed))

@@ -59,6 +59,7 @@ Create an account. Returns `201` with `{"token": "...", "user": {...}}` (the use
 - `dietary_restrictions`: vegetarian, vegan, kosher, halal, jain, no pork, no alcohol, no gelatin. (See `app/dietary.py`.)
 - `activity_level` (optional, default `light`): one of `sedentary`, `light`, `moderate`, `active`, `very_active`. Anything else gets `422`.
 - `meals` (optional, default `null` = all three): which meals the user eats each day, any of `breakfast`, `lunch`, `dinner`. Returned cleaned up, in day order. Change it later with `PUT /users/{id}/meals`.
+- `birthdate`: users must be 16 or older (on today's campus date); a younger birthdate gets `422 "Plate Plan is for people 16 and older."`. The calorie formula is made for adults.
 
 ### `POST /auth/login` ✅
 `{"email": "...", "password": "..."}` → `{"token": "...", "user": {...}}`. Returns `401 "Incorrect email or password"` for a wrong password or an unknown email alike. Accounts made before login existed have no password and can't log in; sign up again.
@@ -81,6 +82,7 @@ Edit the profile. Send only what changes, any of: `name`, `height_in`, `gender`,
 ```
 - Allergies and diet change the dishes shown and recommended right away.
 - A change to height, sex, birthday or activity level recalculates the goal's daily targets (a timeline goal is replanned for the time left).
+- A birthday under 16 gets `422`, as at sign-up.
 - `favorite_halls`: the starred dining halls, by full name as `GET /halls` lists them (e.g. `"Illinois Street Dining Center (ISR)"`), in the order starred; at most 10. Blanks and repeats are dropped. `null` (the default) means none. The Plan page lists starred halls first and opens on the first one serving the meal.
 - `email` and `weight_lbs` are ignored here: the email is the login, and weight changes go through weigh-ins so the history stays right.
 - `422` for an unknown activity level, a non-positive height, an empty `meals`, or `null` for name, height, sex, birthday or activity.
