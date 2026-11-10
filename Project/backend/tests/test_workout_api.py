@@ -128,8 +128,16 @@ def test_energy_needs_a_goal(client):
     assert client.get(f"/users/{uid}/energy?date={DAY}").status_code == 404
 
 
-def test_goal_progress_for_a_timeline_goal(client):
+def travel_to(monkeypatch, day):
+    """Pretend today is `day`, so the days before it can be logged (future dates are refused)."""
+    import app.main as main
+
+    monkeypatch.setattr(main, "_today", lambda: day)
+
+
+def test_goal_progress_for_a_timeline_goal(client, monkeypatch):
     uid = with_goal(client, target_weight_lbs=132, target_date=str(TODAY + timedelta(days=84)))
+    travel_to(monkeypatch, TODAY + timedelta(days=3))
     yesterday = TODAY - timedelta(days=1)
     goal = client.get(f"/users/{uid}/goal").json()
     assert goal["start_date"] == str(TODAY)
@@ -151,8 +159,9 @@ def test_goal_progress_for_a_timeline_goal(client):
     assert yesterday < TODAY  # (yesterday isn't logged and doesn't count)
 
 
-def test_a_weigh_in_restarts_the_count_so_following_the_plan_is_never_behind(client):
+def test_a_weigh_in_restarts_the_count_so_following_the_plan_is_never_behind(client, monkeypatch):
     uid = with_goal(client, target_weight_lbs=132, target_date=str(TODAY + timedelta(days=84)))
+    travel_to(monkeypatch, TODAY + timedelta(days=14))
     plan = client.get(f"/users/{uid}/goal").json()["calorie_goal"]
     for i in range(14):  # exactly the plan
         client.post(f"/users/{uid}/food-logs", json={"item_id": 1, "servings": round(plan / 300, 2),
@@ -166,11 +175,14 @@ def test_a_weigh_in_restarts_the_count_so_following_the_plan_is_never_behind(cli
     assert p["scale"]["status"] == "behind"  # the scale still says so
 
 
-def test_eating_under_the_minimum_is_flagged_not_praised(client):
+def test_eating_under_the_minimum_is_flagged_not_praised(client, monkeypatch):
     uid = with_goal(client, target_weight_lbs=132, target_date=str(TODAY + timedelta(days=84)))
+    travel_to(monkeypatch, TODAY + timedelta(days=7))
     for i in range(7):  # 600 kcal a day
-        client.post(f"/users/{uid}/food-logs", json={"item_id": 1, "servings": 2, "date": str(TODAY + timedelta(days=i))})
+        r = client.post(f"/users/{uid}/food-logs", json={"item_id": 1, "servings": 2, "date": str(TODAY + timedelta(days=i))})
+        assert r.status_code == 201
     p = client.get(f"/users/{uid}/goal/progress?date={TODAY + timedelta(days=7)}").json()
+    assert p["days_logged"] == 7
     assert p["status"] == "unsafe_pace" and p["days_earlier"] is None and p["projected_finish_date"] is None
     assert "safe minimum" in p["message"] and "early" not in p["message"]
 
@@ -243,3 +255,31 @@ def test_servings_cap_is_two_even_for_a_big_meal():
     from app.main import _servings_cap
 
     assert _servings_cap({"kcal": 600}) == 2 and _servings_cap({"kcal": 1200}) == 2  # more dishes, not bigger heaps
+
+
+# ---------- no logging the future ----------
+
+def test_food_weigh_ins_and_workouts_cant_be_logged_for_a_future_date(client):
+    from app.main import _today
+
+    uid = with_goal(client)
+    tomorrow, yesterday = str(_today() + timedelta(days=1)), str(_today() - timedelta(days=1))
+    for path, body in [
+        ("food-logs", {"item_id": 1, "date": tomorrow}),
+        ("food-logs", {"name": "Latte", "kcal": 190, "date": tomorrow}),
+        ("weight-logs", {"weight_lbs": 139, "date": tomorrow}),
+        ("workout-logs", {"exercise_id": "bike", "minutes": 20, "date": tomorrow}),
+    ]:
+        r = client.post(f"/users/{uid}/{path}", json=body)
+        assert r.status_code == 422 and "future" in r.json()["detail"], (path, r.text)
+        assert client.post(f"/users/{uid}/{path}", json={**body, "date": yesterday}).status_code == 201  # filling in yesterday is fine
+    assert client.get(f"/users/{uid}").json()["weight_lbs"] == 139  # only the past weigh-in counted
+
+
+def test_a_dish_from_a_future_menu_cant_be_logged_without_a_date(client, monkeypatch):
+    # Menu item 1 is on DAY (2026-10-08); pretend today is the day before, so its own date is the future
+    uid = with_goal(client)
+    travel_to(monkeypatch, date(2026, 10, 7))
+    assert client.post(f"/users/{uid}/food-logs", json={"item_id": 1}).status_code == 422
+    travel_to(monkeypatch, date(2026, 10, 8))
+    assert client.post(f"/users/{uid}/food-logs", json={"item_id": 1}).status_code == 201
