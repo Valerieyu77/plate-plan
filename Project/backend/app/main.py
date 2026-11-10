@@ -67,11 +67,20 @@ def _today() -> date:
     return datetime.now(CAMPUS_TZ).date() if CAMPUS_TZ else date.today()
 
 
-def _not_in_future(day: date, what: str) -> date:
-    """Logs record what already happened, so a date after today (on campus) is refused with 422.
-    Past days stay open so a forgotten meal or weigh-in can be filled in later."""
-    if day > _today():
+# How far back a forgotten meal, weigh-in or workout can still be filled in
+BACKFILL_DAYS = 7
+
+
+def _loggable(day: date, what: str) -> date:
+    """Logs record what already happened: a date after today (on campus) is refused with 422, and so
+    is one more than BACKFILL_DAYS ago. A missed day can be filled in for a week; older history
+    stays as it is, so progress and the weigh-in calibration aren't rewritten long after the fact."""
+    today = _today()
+    if day > today:
         raise HTTPException(status_code=422, detail=f"{what} can't be logged for a future date ({day})")
+    if day < today - timedelta(days=BACKFILL_DAYS):
+        raise HTTPException(status_code=422,
+                            detail=f"{what} can only be logged for the last {BACKFILL_DAYS} days, not {day}")
     return day
 
 
@@ -218,7 +227,7 @@ def create_food_log(user_id: int, log: FoodLogCreate, session: SessionDep):
     if not session.get(User, user_id):
         raise HTTPException(status_code=404, detail="User not found")
     if log.is_quick_add:
-        db_log = FoodLog(user_id=user_id, date=_not_in_future(log.date or _today(), "Food"), meal=log.meal, servings=1, name=log.name,
+        db_log = FoodLog(user_id=user_id, date=_loggable(log.date or _today(), "Food"), meal=log.meal, servings=1, name=log.name,
                          kcal=log.kcal, protein_g=log.protein_g, carbs_g=log.carbs_g, fat_g=log.fat_g)
         session.add(db_log)
         session.commit()
@@ -232,7 +241,7 @@ def create_food_log(user_id: int, log: FoodLogCreate, session: SessionDep):
         user_id=user_id,
         item_id=item.id,
         servings=log.servings,
-        date=_not_in_future(log.date or item.date, "Food"),  # e.g. a dish from tomorrow's menu
+        date=_loggable(log.date or item.date, "Food"),  # e.g. a dish from tomorrow's menu
         meal=log.meal or item.meal,
     )
     session.add(db_log)
@@ -421,7 +430,7 @@ def create_weight_log(user_id: int, entry: WeightLogCreate, session: SessionDep)
     user = session.get(User, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    day = _not_in_future(entry.date or _today(), "A weigh-in")
+    day = _loggable(entry.date or _today(), "A weigh-in")
     log = WeightLog(user_id=user_id, date=day, weight_lbs=entry.weight_lbs)
     session.add(log)
 
@@ -770,7 +779,7 @@ def create_workout_log(user_id: int, entry: WorkoutLogCreate, session: SessionDe
             kcal = kcal_burned(exercise["met"][entry.intensity], user.weight_lbs, entry.minutes)
     else:
         name, kcal = entry.name, entry.kcal
-    log = WorkoutLog(user_id=user_id, date=_not_in_future(entry.date or _today(), "A workout"), exercise_id=entry.exercise_id,
+    log = WorkoutLog(user_id=user_id, date=_loggable(entry.date or _today(), "A workout"), exercise_id=entry.exercise_id,
                      name=name, minutes=entry.minutes, intensity=entry.intensity, kcal=round(kcal, 1))
     session.add(log)
     session.commit()

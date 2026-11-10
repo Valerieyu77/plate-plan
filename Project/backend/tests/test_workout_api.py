@@ -283,3 +283,21 @@ def test_a_dish_from_a_future_menu_cant_be_logged_without_a_date(client, monkeyp
     assert client.post(f"/users/{uid}/food-logs", json={"item_id": 1}).status_code == 422
     travel_to(monkeypatch, date(2026, 10, 8))
     assert client.post(f"/users/{uid}/food-logs", json={"item_id": 1}).status_code == 201
+
+
+@pytest.mark.backfill_limit
+def test_a_missed_day_can_be_filled_in_for_a_week_but_not_longer(client):
+    from app.main import BACKFILL_DAYS, _today
+
+    uid = with_goal(client)
+    week_ago, too_old = _today() - timedelta(days=BACKFILL_DAYS), _today() - timedelta(days=BACKFILL_DAYS + 1)
+    for path, body in [
+        ("food-logs", {"name": "Latte", "kcal": 190}),
+        ("weight-logs", {"weight_lbs": 139}),
+        ("workout-logs", {"exercise_id": "bike", "minutes": 20}),
+    ]:
+        assert client.post(f"/users/{uid}/{path}", json={**body, "date": str(week_ago)}).status_code == 201, path
+        r = client.post(f"/users/{uid}/{path}", json={**body, "date": str(too_old)})
+        assert r.status_code == 422 and f"last {BACKFILL_DAYS} days" in r.json()["detail"], (path, r.text)
+    # A dish from an old menu, logged with its own date, is too old as well
+    assert client.post(f"/users/{uid}/food-logs", json={"item_id": 1}).status_code == 422
