@@ -41,6 +41,17 @@ export function todayISO() {
   return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10)
 }
 
+// Food, weigh-ins and workouts can be logged for today or up to this many days back; the API refuses older dates
+// (BACKFILL_DAYS in backend app/main.py, keep in sync)
+export const BACKFILL_DAYS = 7
+
+// The earliest date that can still be logged, YYYY-MM-DD in local time
+export function earliestLogISO() {
+  const d = new Date()
+  d.setDate(d.getDate() - BACKFILL_DAYS)
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10)
+}
+
 // Muscle groups GET /users/{id}/workout understands (app/exercises.py MUSCLES); "heart" means cardio
 export const MUSCLE_GROUPS = [
   { value: 'legs', label: 'Legs' },

@@ -68,7 +68,8 @@ def _today() -> date:
     return datetime.now(CAMPUS_TZ).date() if CAMPUS_TZ else date.today()
 
 
-# How far back a forgotten meal, weigh-in or workout can still be filled in
+# How far back a forgotten meal, weigh-in or workout can still be filled in (the frontend's date pickers use the
+# same limit: BACKFILL_DAYS in frontend/src/constants.js, keep in sync)
 BACKFILL_DAYS = 7
 
 
