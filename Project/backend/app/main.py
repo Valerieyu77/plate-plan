@@ -148,8 +148,8 @@ def delete_account(user_id: int, body: AccountDelete, session: SessionDep):
 @app.patch("/users/{user_id}", response_model=UserPublic, dependencies=[OwnerOnly])
 def update_profile(user_id: int, body: ProfileUpdate, session: SessionDep):
     """
-    Edit the profile: name, height, sex, birthday, activity level, allergies, diet, meals. Send only
-    what changes (to clear a list, send []). Allergies and diet change which dishes are shown and
+    Edit the profile: name, height, sex, birthday, activity level, allergies, diet, meals, favorite
+    halls. Send only what changes (to clear a list, send []). Allergies and diet change which dishes are shown and
     recommended right away; body and activity changes recalculate the goal's daily targets (a timeline
     goal is replanned for the time left). Weight changes go through weigh-ins.
     """
@@ -235,9 +235,25 @@ def create_food_log(user_id: int, log: FoodLogCreate, session: SessionDep):
 
 @app.get("/users/{user_id}/food-logs", response_model=list[FoodLogPublic], dependencies=[OwnerOnly])
 def list_food_logs(user_id: int, date: date, session: SessionDep):
+    """
+    Everything logged on a date. A menu dish comes back with its name, hall and nutrients for the
+    servings logged (like a quick add's), so the day can be listed and a misclick removed.
+    """
     if not session.get(User, user_id):
         raise HTTPException(status_code=404, detail="User not found")
-    return session.exec(select(FoodLog).where(FoodLog.user_id == user_id, FoodLog.date == date)).all()
+    logs = session.exec(select(FoodLog).where(FoodLog.user_id == user_id, FoodLog.date == date)).all()
+    item_ids = {l.item_id for l in logs if l.item_id is not None}
+    items = {i.id: i for i in session.exec(select(MenuItem).where(MenuItem.id.in_(item_ids))).all()} if item_ids else {}
+    out = []
+    for l in logs:
+        row = FoodLogPublic.model_validate(l)
+        item = items.get(l.item_id)
+        if item:
+            nutrients = item_nutrients(item, l.servings)
+            row = row.model_copy(update={"name": item.name, "hall": item.hall,
+                                         **{k: round(v, 1) for k, v in nutrients.items()}})
+        out.append(row)
+    return out
 
 
 def _plan_or_422(user: User, goal: GoalCreate) -> dict:

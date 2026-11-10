@@ -25,6 +25,24 @@ def _check_meals(v):
     return [m for m in MEAL_CHOICES if m in meals]
 
 
+MAX_FAVORITE_HALLS = 10
+
+
+def _check_favorite_halls(v):
+    """Starred dining halls, by their full name as GET /halls lists it, in the order starred.
+    Blanks and repeats are dropped; None means none starred."""
+    if v is None:
+        return None
+    seen, out = set(), []
+    for hall in (h.strip() for h in v):
+        if hall and hall not in seen:
+            seen.add(hall)
+            out.append(hall)
+    if len(out) > MAX_FAVORITE_HALLS:
+        raise ValueError(f"at most {MAX_FAVORITE_HALLS} favorite halls")
+    return out
+
+
 # ---------- User ----------
 
 class UserBase(SQLModel):
@@ -44,11 +62,19 @@ class UserBase(SQLModel):
     # The meals eaten each day, e.g. ["breakfast", "dinner"]; None means all three. The day's calories
     # are shared between these meals only (see nutrition.meal_target).
     meals: list[str] | None = Field(default=None, sa_column=Column(JSON))
+    # Starred dining halls (people tend to eat at the one nearest them). The Plan page opens on the
+    # first one serving the meal and lists them first. None means none starred.
+    favorite_halls: list[str] | None = Field(default=None, sa_column=Column(JSON))
 
     @field_validator("meals")
     @classmethod
     def _check_meals(cls, v):
         return _check_meals(v)
+
+    @field_validator("favorite_halls")
+    @classmethod
+    def _check_favorite_halls(cls, v):
+        return _check_favorite_halls(v)
 
     @field_validator("activity_level")
     @classmethod
@@ -111,6 +137,7 @@ class ProfileUpdate(SQLModel):
     allergies: list[str] | None = None
     dietary_restrictions: list[str] | None = None
     meals: list[str] | None = None
+    favorite_halls: list[str] | None = None  # send [] to clear
 
     @field_validator("activity_level")
     @classmethod
@@ -123,6 +150,11 @@ class ProfileUpdate(SQLModel):
     @classmethod
     def _check_meals(cls, v):
         return _check_meals(v)
+
+    @field_validator("favorite_halls")
+    @classmethod
+    def _check_favorite_halls(cls, v):
+        return _check_favorite_halls(v)
 
     @field_validator("allergies", "dietary_restrictions")
     @classmethod
@@ -318,12 +350,14 @@ class FoodLogPublic(SQLModel):
     meal: str
     servings: float
     item_id: int | None
-    # Set only for a quick add (whole-entry nutrition)
+    # A quick add stores these itself. GET .../food-logs also fills them in for a menu dish (its name,
+    # and nutrients for the servings logged), so a day's log can be listed without looking up each dish.
     name: str | None = None
     kcal: float | None = None
     protein_g: float | None = None
     carbs_g: float | None = None
     fat_g: float | None = None
+    hall: str | None = None  # the menu dish's dining hall; None for a quick add
 
 
 # ---------- Workout log ----------

@@ -177,3 +177,61 @@ def test_someone_else_cant_delete_your_account(client):
     uid = make_user(client)
     make_user(client, email="other@example.com")
     assert client.request("DELETE", f"/users/{uid}", json={"password": PASSWORD}).status_code == 403
+
+
+# ---------- favorite halls ----------
+
+ISR = "Illinois Street Dining Center (ISR)"
+IKE = "Ikenberry Dining Center (Ike)"
+
+
+def test_star_and_unstar_halls(client):
+    uid = make_user(client)
+    assert client.get(f"/users/{uid}").json()["favorite_halls"] is None
+
+    r = client.patch(f"/users/{uid}", json={"favorite_halls": [f"  {ISR} ", IKE, ISR, ""]})
+    assert r.status_code == 200, r.text
+    assert r.json()["favorite_halls"] == [ISR, IKE]  # trimmed, blanks and repeats dropped, order kept
+    assert client.get("/auth/me").json()["favorite_halls"] == [ISR, IKE]
+
+    # Editing something else leaves the stars alone
+    client.patch(f"/users/{uid}", json={"name": "Renamed"})
+    assert client.get(f"/users/{uid}").json()["favorite_halls"] == [ISR, IKE]
+
+    assert client.patch(f"/users/{uid}", json={"favorite_halls": []}).json()["favorite_halls"] == []
+
+
+def test_too_many_favorite_halls_is_refused(client):
+    uid = make_user(client)
+    r = client.patch(f"/users/{uid}", json={"favorite_halls": [f"Hall {i}" for i in range(11)]})
+    assert r.status_code == 422
+
+
+def test_favorite_halls_column_is_added_to_an_old_database():
+    from sqlalchemy import create_engine, inspect, text
+    from sqlmodel.pool import StaticPool
+    from app.database import create_db_and_tables
+
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    with engine.begin() as conn:  # a user table from before favorites existed
+        conn.execute(text('CREATE TABLE "user" (id INTEGER PRIMARY KEY, name VARCHAR NOT NULL, email VARCHAR NOT NULL)'))
+    create_db_and_tables(engine)
+    assert "favorite_halls" in {c["name"] for c in inspect(engine).get_columns("user")}
+
+
+# ---------- the day's food log ----------
+
+def test_the_days_log_names_menu_dishes_and_quick_adds(client):
+    uid = with_goal(client)
+    dish = client.post(f"/users/{uid}/food-logs", json={"item_id": 1, "servings": 1.5}).json()  # 300 kcal chicken
+    client.post(f"/users/{uid}/food-logs", json={"name": "Latte", "kcal": 190, "date": DAY})
+
+    logs = {l["id"]: l for l in client.get(f"/users/{uid}/food-logs?date={DAY}").json()}
+    menu = logs[dish["id"]]
+    assert menu["name"] and menu["hall"] and menu["kcal"] == 450 and menu["servings"] == 1.5
+    quick = next(l for l in logs.values() if l["item_id"] is None)
+    assert quick["name"] == "Latte" and quick["kcal"] == 190 and quick["hall"] is None
+
+    # A misclick comes off the day
+    assert client.delete(f"/users/{uid}/food-logs/{dish['id']}").status_code == 204
+    assert [l["name"] for l in client.get(f"/users/{uid}/food-logs?date={DAY}").json()] == ["Latte"]

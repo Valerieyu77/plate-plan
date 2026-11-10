@@ -13,7 +13,7 @@ const REFRESH_DELAY_MS = 500
 // "Where should I eat?": every hall that serves this meal, ranked by how well the best plate there
 // fits what the user still needs, plus the plate with the most protein inside the same calories.
 // Tap a hall to open it. `version` goes up whenever something is logged, which re-runs the comparison.
-export default function HallPicks({ userId, date, group, hall, onPickHall, version }) {
+export default function HallPicks({ userId, date, group, hall, favorites, onPickHall, version }) {
   const scope = `${userId}|${date}|${group}`
   const [state, setState] = useState({ scope: null })
   const [attempt, setAttempt] = useState(0)
@@ -93,7 +93,10 @@ export default function HallPicks({ userId, date, group, hall, onPickHall, versi
               >
                 <span className="flex items-center justify-between gap-2">
                   <span className="flex min-w-0 items-center gap-2 font-semibold">
-                    <span className="truncate">{shortHall(h.hall)}</span>
+                    <span className="truncate">
+                      {favorites?.has(h.hall) && <span className="text-brand" aria-label="Favorite">★ </span>}
+                      {shortHall(h.hall)}
+                    </span>
                     {great && <span className="shrink-0 rounded-full bg-good/10 px-2 py-0.5 text-[11px] font-semibold text-good">Great match</span>}
                   </span>
                   <span className="shrink-0 text-sm font-bold">{h.match}%</span>
