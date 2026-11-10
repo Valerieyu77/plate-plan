@@ -317,7 +317,9 @@ function GoalProgressCard({ data, latestWeighIn }) {
 }
 
 function TimelineSummary({ timeline: t }) {
-  const [label, tone] = STATUS[t.status]
+  // With no weigh-in since the goal began, the backend compares the starting weight with the plan's first day, which
+  // always reads "on track"; there is nothing to judge yet
+  const [label, tone] = t.actual.length > 0 ? STATUS[t.status] : ['No weigh-in yet', 'bg-surface text-muted']
   return (
     <div className="mt-3 rounded-xl bg-bg p-3.5 text-sm">
       <div className="flex items-center justify-between gap-3">

@@ -95,13 +95,18 @@ export default function GoalPage({ user, onUserChange, onContinue }) {
 
   const choose = (g) => {
     setType(g)
-    if (g === 'maintain') save({ goal_type: 'maintain' })
+    // Nothing to replace (no goal yet, or already maintaining): save at once. Switching from a lose or gain goal
+    // asks first (the card below), since it replaces that goal and its timeline.
+    if (g === 'maintain' && (!goal || goal.goal_type === 'maintain')) save({ goal_type: 'maintain' })
   }
 
   const isSaved =
     goal &&
     goal.goal_type === type &&
     (timelineType ? goal.target_date === targetDate && goal.target_weight_lbs === weight : !goal.target_date)
+  const confirmMaintain = type === 'maintain' && goal && goal.goal_type !== 'maintain'
+  // Another goal is being picked or edited above, so the saved targets below aren't what it will give
+  const outdated = goal && !isSaved && (type !== goal.goal_type || targetWeight !== '')
 
   return (
     <section>
@@ -205,6 +210,26 @@ export default function GoalPage({ user, onUserChange, onContinue }) {
         </Card>
       )}
 
+      {confirmMaintain && (
+        <Card className="mt-4">
+          <h2 className="text-lg font-bold">Switch to maintaining?</h2>
+          <p className="mt-1 text-sm text-muted">
+            This replaces your current goal (<span className="font-medium text-ink">{goalSummary(goal)}</span>) with eating what your body uses.
+          </p>
+          <Button onClick={() => save({ goal_type: 'maintain' })} disabled={busy} className="mt-4 w-full">
+            {busy ? 'Saving…' : 'Switch to maintain'}
+          </Button>
+          <button
+            type="button"
+            onClick={() => setType(goal.goal_type)}
+            disabled={busy}
+            className="mt-3 w-full text-center text-sm font-medium text-muted hover:text-ink"
+          >
+            Keep my current goal
+          </button>
+        </Card>
+      )}
+
       <div className="mt-4 space-y-3">
         <ErrorNote>{error}</ErrorNote>
         {goal?.warning && <ErrorNote>{goal.warning}</ErrorNote>}
@@ -212,14 +237,19 @@ export default function GoalPage({ user, onUserChange, onContinue }) {
 
       {goal && (
         <div className="mt-6">
-          <Label className="mb-2">Your daily targets</Label>
+          <Label className="mb-2">{outdated ? 'Your current targets' : 'Your daily targets'}</Label>
+          {outdated && (
+            <p role="status" className="mb-3 rounded-xl bg-brand-soft px-3.5 py-2.5 text-sm text-brand-deep">
+              These are from your saved goal ({goalSummary(goal)}). They change once you save the new goal above.
+            </p>
+          )}
           {goal.target_date && (
             <p className="mb-3 text-sm">
               Reach <span className="font-semibold">{goal.target_weight_lbs} lb</span> by{' '}
               <span className="font-semibold">{fmtDate(goal.target_date)}</span>: about {goal.weekly_rate_lbs} lb a week.
             </p>
           )}
-          <div className="grid grid-cols-2 gap-3">
+          <div className={`grid grid-cols-2 gap-3 transition-opacity ${outdated ? 'opacity-50' : ''}`}>
             {[
               ['Calories', goal.calorie_goal, 'kcal', true],
               ['Protein', goal.protein_goal_g, 'g'],
@@ -247,6 +277,13 @@ export default function GoalPage({ user, onUserChange, onContinue }) {
       </p>
     </section>
   )
+}
+
+// The saved goal in a few words: "Lose weight, 150 lb by Dec 1", "Gain muscle at a steady pace", "Maintain"
+function goalSummary(goal) {
+  const label = GOALS[goal.goal_type]?.label || goal.goal_type
+  if (goal.target_date) return `${label}, ${goal.target_weight_lbs} lb by ${fmtDate(goal.target_date)}`
+  return goal.goal_type === 'maintain' ? label : `${label} at a steady pace`
 }
 
 // What the plan needs, how safe it is, and, if it isn't, one-tap safe alternatives

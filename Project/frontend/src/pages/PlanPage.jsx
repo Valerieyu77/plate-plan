@@ -370,7 +370,7 @@ export default function PlanPage({ user, onSetGoal }) {
             </div>
             {future && (
               <p className="mb-3 rounded-xl bg-brand-soft px-3.5 py-2.5 text-sm text-brand-deep">
-                This is the menu for {fmtDate(date)}. You can check off what you eat on that day.
+                This is the menu for {fmtDate(date)}. You can log what you eat on that day.
               </p>
             )}
             {/* Food from elsewhere for this meal: it counts like a dish, so the budget and tray follow */}
@@ -437,38 +437,46 @@ export default function PlanPage({ user, onSetGoal }) {
   )
 }
 
-// locked: a future date, so there is no "ate this" circle. A dish already logged for that day (before logging ahead
+// One dish. "+ Ate this" logs a serving, then the stepper changes or removes it. Only the button logs: the row itself
+// isn't a tap target, so scrolling the menu can't log a dish by accident.
+// locked: a future date, so there is no "Ate this" button. A dish already logged for that day (before logging ahead
 // was blocked) keeps its stepper, so it can still be removed.
 function DishRow({ item, servings, busy, locked, onServings }) {
   const checked = servings > 0
   const serving = item.serving_size ? `${item.serving_size} ${item.serving_unit || ''}`.trim() : null
   return (
-    <li className={`flex items-center gap-2 pr-4 transition-colors ${busy ? 'opacity-60' : ''}`}>
-      <label className={`flex min-w-0 flex-1 items-center gap-3 py-3 pl-4 ${locked ? '' : 'cursor-pointer active:bg-bg'}`}>
-        <div className="min-w-0 flex-1">
-          <p className="flex items-center gap-2 font-medium">
-            <span className="truncate">{item.name}</span>
-            {(item.is_vegan || item.is_vegetarian) && (
-              <span className="shrink-0 rounded-full bg-good/10 px-2 py-0.5 text-[11px] font-semibold text-good">{item.is_vegan ? 'Vegan' : 'Veg'}</span>
-            )}
-          </p>
-          <p className="mt-0.5 text-[13px] text-muted">
-            <span className="font-medium text-ink">{fmt(item.kcal)} kcal</span> · {fmt(item.protein_g)}P {fmt(item.carbs_g)}C {fmt(item.fat_g)}F
-            {serving && ` · ${serving}`}
-          </p>
-          {allergensOf(item).length > 0 && <p className="mt-0.5 text-[12px] text-muted">Contains {allergensOf(item).join(', ')}</p>}
-        </div>
-        {!locked && (
-          <input type="checkbox" checked={checked} disabled={busy} onChange={() => onServings(checked ? 0 : 1)} aria-label={`Ate ${item.name}`} className="peer sr-only" />
-        )}
-        {!checked && !locked && (
-          <span
-            aria-hidden="true"
-            className="grid h-7 w-7 shrink-0 place-items-center rounded-full border-2 border-line text-transparent transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-brand/40"
-          />
-        )}
-      </label>
-      {checked && <ServingStepper name={item.name} servings={servings} busy={busy} canAdd={!locked} onChange={onServings} />}
+    <li className={`flex items-center gap-3 py-3 pr-4 pl-4 transition-colors ${busy ? 'opacity-60' : ''}`}>
+      <div className="min-w-0 flex-1">
+        <p className="flex items-center gap-2 font-medium">
+          <span className="truncate">{item.name}</span>
+          {(item.is_vegan || item.is_vegetarian) && (
+            <span className="shrink-0 rounded-full bg-good/10 px-2 py-0.5 text-[11px] font-semibold text-good">{item.is_vegan ? 'Vegan' : 'Veg'}</span>
+          )}
+        </p>
+        <p className="mt-0.5 text-[13px] text-muted">
+          <span className="font-medium text-ink">{fmt(item.kcal)} kcal</span> · {fmt(item.protein_g)}P {fmt(item.carbs_g)}C {fmt(item.fat_g)}F
+          {serving && ` · ${serving}`}
+        </p>
+        {allergensOf(item).length > 0 && <p className="mt-0.5 text-[12px] text-muted">Contains {allergensOf(item).join(', ')}</p>}
+      </div>
+      {checked ? (
+        <ServingStepper name={item.name} servings={servings} busy={busy} canAdd={!locked} onChange={onServings} />
+      ) : (
+        !locked && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => onServings(1)}
+            aria-label={`Ate this: ${item.name}`}
+            className="flex shrink-0 items-center gap-1 rounded-full px-3 py-1.5 text-[13px] font-semibold text-brand ring-1 ring-brand/40 transition-colors hover:bg-brand-soft active:bg-brand-soft disabled:opacity-60"
+          >
+            <span aria-hidden="true" className="text-base leading-none">
+              +
+            </span>
+            Ate this
+          </button>
+        )
+      )}
     </li>
   )
 }

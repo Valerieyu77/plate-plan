@@ -169,12 +169,15 @@ function ProgressPreview({ progress, targetWeight }) {
 
 // The three parts of the app, in the order a new user goes through them (sign up / log in is in the header).
 // `mine` picks the preview's props out of the user's loaded data, or returns nothing to show the example.
+// Once the user has a goal, Home shows only their own previews, under `own.title` and `own.link`, in `own.order`
+// (the tab bar's order: the next meal first).
 const SECTIONS = [
   {
     href: '#/goal',
     title: 'Goal',
     tagline: 'Pick a goal and get your daily targets.',
     link: 'Set your goal',
+    own: { title: 'Your targets', link: 'Change your goal', order: 3 },
     Preview: GoalPreview,
     example: { goal: EXAMPLE_GOAL, goalType: 'lose' },
     mine: (data) => data.goal && { goal: data.goal, goalType: data.goal.goal_type },
@@ -184,6 +187,7 @@ const SECTIONS = [
     title: 'Plan',
     tagline: 'Find the hall and dishes that fit your next meal.',
     link: 'Plan a meal',
+    own: { title: 'Your next meal', link: 'Plan this meal', order: 1 },
     Preview: PlanPreview,
     example: { picks: EXAMPLE_PICKS, group: 'lunch' },
     mine: (data) => data.picks?.halls?.length > 0 && { picks: data.picks, group: data.group },
@@ -193,11 +197,16 @@ const SECTIONS = [
     title: 'Progress',
     tagline: 'Track what you eat and how your weight changes.',
     link: 'See your progress',
+    own: { title: 'Your progress', link: 'See your progress', order: 2 },
     Preview: ProgressPreview,
     example: { progress: EXAMPLE_PROGRESS, targetWeight: 165 },
     mine: (data) => data.progress && { progress: data.progress, targetWeight: data.goal?.target_weight_lbs },
   },
 ]
+const OWN_SECTIONS = [...SECTIONS].sort((a, b) => a.own.order - b.own.order)
+
+// "Monday, November 9"
+const todayLong = () => new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })
 
 export default function HomePage({ user }) {
   const userId = user?.id ?? null
@@ -223,17 +232,28 @@ export default function HomePage({ user }) {
 
   const loading = userId !== null && data.userId !== userId
   const loaded = userId !== null && !loading ? data : null
+  // Signed in with a goal, Home is the user's day rather than a tour of the app (while loading, assume a returning
+  // user: new accounts go straight to the Goal page)
+  const returning = userId !== null && (loading || Boolean(loaded?.goal))
+  const firstName = user?.name.trim().split(/\s+/)[0]
 
   return (
     <section>
       <div className="pt-4 pb-6">
-        <p className="text-[13px] font-semibold text-brand">
-          {user ? `Welcome back, ${user.name.trim().split(/\s+/)[0]}` : 'For UIUC students and staff'}
-        </p>
-        <h1 className="mt-2 text-[2rem] leading-tight font-bold tracking-tight">Know what to eat before you reach the dining hall.</h1>
-        <p className="mt-3 text-muted">
-          Plate Plan reads today's Illinois dining menus, sets calorie and macro targets for your goal, and shows which dishes fit your next meal.
-        </p>
+        {returning ? (
+          <>
+            <p className="text-[13px] font-semibold text-brand">{todayLong()}</p>
+            <h1 className="mt-2 text-[2rem] leading-tight font-bold tracking-tight">Welcome back, {firstName}</h1>
+          </>
+        ) : (
+          <>
+            <p className="text-[13px] font-semibold text-brand">{user ? `Welcome back, ${firstName}` : 'For UIUC students and staff'}</p>
+            <h1 className="mt-2 text-[2rem] leading-tight font-bold tracking-tight">Know what to eat before you reach the dining hall.</h1>
+            <p className="mt-3 text-muted">
+              Plate Plan reads today's Illinois dining menus, sets calorie and macro targets for your goal, and shows which dishes fit your next meal.
+            </p>
+          </>
+        )}
         {user && (
           <ButtonLink href="#/plan" className="mt-5 w-full">
             Plan my next meal
@@ -243,6 +263,40 @@ export default function HomePage({ user }) {
 
       {userId !== null && <TodayCalories userId={userId} />}
 
+      {returning ? (
+        // The user's own previews only; one without data (say, no menus today) is left out rather than shown as an example
+        <div className="space-y-3">
+          {OWN_SECTIONS.map(({ href, own: { title, link }, Preview, mine }) => {
+            const props = loaded && mine(loaded)
+            if (!loading && !props) return null
+            return (
+              <Card key={href} className="relative ring-2 ring-transparent transition hover:ring-line">
+                <h2 className="text-lg font-bold">{title}</h2>
+                <div aria-hidden="true" className="mt-3 rounded-xl bg-bg p-2">
+                  {loading ? <p className="py-10 text-center text-[13px] text-muted">Loading your numbers…</p> : <Preview {...props} />}
+                </div>
+                <a href={href} className="mt-4 inline-flex items-center gap-1 text-[15px] font-semibold text-brand after:absolute after:inset-0 after:rounded-2xl">
+                  {link}
+                  <span aria-hidden="true">→</span>
+                </a>
+              </Card>
+            )
+          })}
+        </div>
+      ) : (
+        <OnboardingSteps user={user} loaded={loaded} />
+      )}
+
+      <EventsList />
+    </section>
+  )
+}
+
+// New visitors (and accounts without a goal yet): the three parts of the app as numbered steps, each with a preview
+// drawn from the user's own data where there is some, or an example marked "Example"
+function OnboardingSteps({ user, loaded }) {
+  return (
+    <>
       <Label>What you can do</Label>
       {!user && <p className="mt-1 text-sm text-muted">Sign up at the top right to try them with your own numbers.</p>}
       <ol className="mt-3 space-y-3">
@@ -256,11 +310,11 @@ export default function HomePage({ user }) {
                     {i + 1}
                   </span>
                   <h2 className="text-lg font-bold">{title}</h2>
-                  {!loading && !own && <span className="ml-auto rounded-full bg-bg px-2 py-0.5 text-[11px] font-semibold text-muted">Example</span>}
+                  {!own && <span className="ml-auto rounded-full bg-bg px-2 py-0.5 text-[11px] font-semibold text-muted">Example</span>}
                 </div>
                 <p className="mt-1 text-[15px] text-muted">{tagline}</p>
                 <div aria-hidden="true" className="mt-3 rounded-xl bg-bg p-2">
-                  {loading ? <p className="py-10 text-center text-[13px] text-muted">Loading your numbers…</p> : <Preview {...(own || example)} />}
+                  <Preview {...(own || example)} />
                 </div>
                 {/* The link stretches over the whole card (after:inset-0), so a tap anywhere on it opens the section */}
                 <a href={href} className="mt-4 inline-flex items-center gap-1 text-[15px] font-semibold text-brand after:absolute after:inset-0 after:rounded-2xl">
@@ -272,9 +326,7 @@ export default function HomePage({ user }) {
           )
         })}
       </ol>
-
-      <EventsList />
-    </section>
+    </>
   )
 }
 
