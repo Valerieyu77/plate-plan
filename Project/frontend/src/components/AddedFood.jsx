@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { deleteFoodLog, getFoodLogs } from '../api'
-import { todayISO } from '../constants'
+import { BACKFILL_DAYS, earliestLogISO, todayISO } from '../constants'
 import { fmt, fmtDate, mealLabel, shortHall } from '../format'
 import QuickAddButton from './QuickAdd'
 import { Card } from './ui'
@@ -52,6 +52,8 @@ export default function AddedFoodCard({ userId, date, onChanged, version = 0 }) 
 
   const foods = state.key === key ? state.foods : null
   const future = date > todayISO()
+  // Older than the backfill window: the list can still be read and fixed, but nothing new can be added
+  const tooOld = date < earliestLogISO()
   // Nothing logged and nothing that can be logged (a future day): no card at all
   if (future && !foods?.length) return null
 
@@ -67,7 +69,7 @@ export default function AddedFoodCard({ userId, date, onChanged, version = 0 }) 
             {foods?.length ? `${fmt(total)} kcal ${date === todayISO() ? 'today' : `on ${fmtDate(date)}`} · tap × to remove a mistake` : 'Menu dishes and anything you added'}
           </p>
         </div>
-        {!future && (
+        {!future && !tooOld && (
           <QuickAddButton
             userId={userId}
             date={date}
@@ -78,7 +80,7 @@ export default function AddedFoodCard({ userId, date, onChanged, version = 0 }) 
       </div>
 
       {foods === null ? null : foods.length === 0 ? (
-        <p className="mt-3 text-sm text-muted">{state.loadError ? `Couldn't load your food log. ${state.loadError}` : `Nothing logged ${date === todayISO() ? 'today' : `on ${fmtDate(date)}`} yet.`}</p>
+        <p className="mt-3 text-sm text-muted">{state.loadError ? `Couldn't load your food log. ${state.loadError}` : tooOld ? `Nothing logged on ${fmtDate(date)}. Food can be added for the last ${BACKFILL_DAYS} days.` : `Nothing logged ${date === todayISO() ? 'today' : `on ${fmtDate(date)}`} yet.`}</p>
       ) : (
         <div className="mt-3 space-y-3">
           {sections.map(([section, list]) => (

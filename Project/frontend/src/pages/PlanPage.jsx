@@ -4,7 +4,7 @@ import AddedFoodCard from '../components/AddedFood'
 import HallPicks from '../components/HallPicks'
 import QuickAddButton from '../components/QuickAdd'
 import { Button, Card, ChipScroller, DateChip, ErrorNote, Input, Label, Loading, PageHeader, ProgressRing } from '../components/ui'
-import { ALLERGIES, MEAL_GROUPS, defaultGroup, todayISO } from '../constants'
+import { ALLERGIES, BACKFILL_DAYS, defaultGroup, earliestLogISO, MEAL_GROUPS, todayISO } from '../constants'
 import { fmt, fmtDate, mealLabel, shortHall } from '../format'
 import { getPrefs, setPrefs } from '../session'
 
@@ -138,6 +138,13 @@ export default function PlanPage({ user, onUserChange, onSetGoal }) {
   }, [menuKey, hall, date, meal, user.id])
   const current = menuKey && menu.key === menuKey ? menu : null
 
+  // Menus are published ahead, so a later date can be browsed and planned, but not logged as eaten yet. A day more
+  // than BACKFILL_DAYS ago can't be logged any more either (the API refuses it). Either way the day is view-only,
+  // though a dish logged earlier can still be removed.
+  const future = date > todayISO()
+  const tooOld = date < earliestLogISO()
+  const locked = future || tooOld
+
   // item id -> food log, so a checked dish can be un-checked or have its servings changed
   const logByItem = useMemo(() => new Map((current?.logs || []).map((l) => [l.item_id, l])), [current?.logs])
 
@@ -227,8 +234,9 @@ export default function PlanPage({ user, onUserChange, onSetGoal }) {
   // Log `servings` of a dish (0 removes it). The API can't edit a log, so a new amount replaces the old one:
   // add the new log first and remove the old one only once that worked, so a failure never loses what was logged.
   const logServings = async (item, servings) => {
-    // A future day: nothing new can be logged, but an amount logged earlier can still be lowered or removed
-    if (date > todayISO() && servings > (logByItem.get(item.id)?.servings || 0)) return
+    // A view-only day: a dish logged earlier can be removed, but nothing can be logged, and changing an amount means
+    // logging it again, which the API refuses for that day
+    if (locked && servings > 0) return
     const log = logByItem.get(item.id)
     setActionError('')
     setPending((p) => new Set(p).add(item.id))
@@ -254,7 +262,7 @@ export default function PlanPage({ user, onUserChange, onSetGoal }) {
   // Log every dish of the recommended tray. All-or-nothing as far as we can: add every new log first, undo them if
   // one fails, and only then remove the entries they replace. The tray's dishes are locked while this runs.
   const logTray = async () => {
-    if (date > todayISO()) return
+    if (locked) return
     const lines = current?.rec?.items || []
     const ids = lines.map((l) => l.item_id)
     const created = []
@@ -311,14 +319,11 @@ export default function PlanPage({ user, onUserChange, onSetGoal }) {
     }
   }
 
-  // Menus are published ahead, so a later date can be browsed and planned, but not logged as eaten yet
-  const future = date > todayISO()
-
   const trayLogged = (current?.rec?.items || []).length > 0 && current.rec.items.every((l) => logByItem.get(l.item_id)?.servings === l.servings)
 
   return (
     <section>
-      <PageHeader title="Plan a meal" sub="Dishes that clash with your allergies or diet are hidden." action={<DateChip value={date} onChange={setDate} />} />
+      <PageHeader title="Plan a meal" sub="Dishes that clash with your allergies or diet are hidden." action={<DateChip value={date} onChange={setDate} min={earliestLogISO()} />} />
 
       <div className="space-y-4">
         <div>
@@ -399,7 +404,7 @@ export default function PlanPage({ user, onUserChange, onSetGoal }) {
               rec={current.rec}
               itemsById={itemsById}
               logged={trayLogged}
-              logBlockedLabel={future ? `Log on ${fmtDate(date)}` : null}
+              logBlockedLabel={future ? `Log on ${fmtDate(date)}` : tooOld ? 'Too long ago to log' : null}
               logBusy={trayBusy}
               anotherBusy={recBusy}
               noMore={noMore}
@@ -420,8 +425,13 @@ export default function PlanPage({ user, onUserChange, onSetGoal }) {
                 This is the menu for {fmtDate(date)}. You can log what you eat on that day.
               </p>
             )}
+            {tooOld && (
+              <p className="mb-3 rounded-xl bg-brand-soft px-3.5 py-2.5 text-sm text-brand-deep">
+                Meals can be logged for the last {BACKFILL_DAYS} days, so the menu for {fmtDate(date)} is view-only.
+              </p>
+            )}
             {/* Food from elsewhere for this meal: it counts like a dish, so the budget and tray follow */}
-            {!future && (
+            {!locked && (
               <div className="mb-3 flex items-center justify-between gap-3 px-1 text-[13px] text-muted">
                 <span>Ate something that isn't on this menu?</span>
                 <QuickAddButton
@@ -466,7 +476,7 @@ export default function PlanPage({ user, onUserChange, onSetGoal }) {
                           item={item}
                           servings={logByItem.get(item.id)?.servings || 0}
                           busy={pending.has(item.id)}
-                          locked={future}
+                          locked={locked}
                           onServings={(n) => logServings(item, n)}
                         />
                       ))}
@@ -496,8 +506,8 @@ export default function PlanPage({ user, onUserChange, onSetGoal }) {
 
 // One dish. "+ Ate this" logs a serving, then the stepper changes or removes it. Only the button logs: the row itself
 // isn't a tap target, so scrolling the menu can't log a dish by accident.
-// locked: a future date, so there is no "Ate this" button. A dish already logged for that day (before logging ahead
-// was blocked) keeps its stepper, so it can still be removed.
+// locked: a future date, or one more than BACKFILL_DAYS ago, so there is no "Ate this" button. A dish already logged
+// for that day keeps its stepper, whose − removes it.
 function DishRow({ item, servings, busy, locked, onServings }) {
   const checked = servings > 0
   const serving = item.serving_size ? `${item.serving_size} ${item.serving_unit || ''}`.trim() : null
@@ -540,7 +550,7 @@ function DishRow({ item, servings, busy, locked, onServings }) {
 
 // − 1.5 + : at the lowest step, − removes the dish. The number can also be typed: Enter or leaving the field
 // saves it, Escape puts it back, and 0 removes the dish.
-// canAdd false (a future date): the amount can only go down
+// canAdd false (a view-only day): − removes the dish and the amount can't be changed, since a new amount is a new log
 function ServingStepper({ name, servings, busy, canAdd = true, onChange }) {
   const btn = 'grid h-7 w-7 place-items-center rounded-full text-lg leading-none font-semibold transition-colors disabled:opacity-40'
   const [draft, setDraft] = useState(null) // what is being typed; null when not editing
@@ -571,8 +581,8 @@ function ServingStepper({ name, servings, busy, canAdd = true, onChange }) {
       <button
         type="button"
         disabled={busy}
-        onClick={() => onChange(servings - SERVING_STEP)}
-        aria-label={servings <= SERVING_STEP ? `Remove ${name}` : `Fewer servings of ${name}`}
+        onClick={() => onChange(canAdd ? servings - SERVING_STEP : 0)}
+        aria-label={!canAdd || servings <= SERVING_STEP ? `Remove ${name}` : `Fewer servings of ${name}`}
         className={`${btn} text-brand active:bg-brand/10`}
       >
         −
@@ -582,7 +592,7 @@ function ServingStepper({ name, servings, busy, canAdd = true, onChange }) {
           type="text"
           inputMode="decimal"
           value={draft ?? String(servings)}
-          disabled={busy}
+          disabled={busy || !canAdd}
           onFocus={(e) => {
             setDraft(String(servings))
             setInvalid(false)
@@ -682,7 +692,7 @@ function MealTargetCard({ target, meal, day, onSetGoal }) {
   )
 }
 
-// logBlockedLabel: set for a future date, where the tray can't be logged yet (e.g. "Log on Nov 12")
+// logBlockedLabel: set on a day the tray can't be logged ("Log on Nov 12" ahead, "Too long ago to log" for an old day)
 function RecommendationCard({ rec, itemsById, logged, logBlockedLabel, logBusy, anotherBusy, noMore, onLog, onAnother }) {
   const lines = rec.items || []
   return (

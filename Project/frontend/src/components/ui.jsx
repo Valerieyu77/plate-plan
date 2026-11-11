@@ -42,11 +42,12 @@ export function Label({ children, className = '' }) {
 }
 
 // Small date picker that looks like a chip, for page headers
-export function DateChip({ value, onChange, max }) {
+export function DateChip({ value, onChange, min, max }) {
   return (
     <input
       type="date"
       value={value}
+      min={min}
       max={max}
       onChange={(e) => e.target.value && onChange(e.target.value)}
       aria-label="Date"

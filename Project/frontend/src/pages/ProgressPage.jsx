@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { addWeightLog, deleteWeightLog, getGoalProgress, getGoalTimeline, getProgress, getWeightLogs } from '../api'
 import { Bar, Button, Card, DateChip, ErrorNote, Field, Input, Label, Loading, PageHeader, ProgressRing } from '../components/ui'
-import { todayISO } from '../constants'
+import { earliestLogISO, todayISO } from '../constants'
 import { fmtDate } from '../format'
 import AddedFoodCard from '../components/AddedFood'
 
@@ -169,7 +169,7 @@ export default function ProgressPage({ user, onSetGoal }) {
 
             <form onSubmit={saveWeight} className="mt-4 grid grid-cols-2 gap-3">
               <Field label="Date">
-                <Input type="date" required max={todayISO()} value={weighIn.date} onChange={(e) => setWeighIn((w) => ({ ...w, date: e.target.value }))} />
+                <Input type="date" required min={earliestLogISO()} max={todayISO()} value={weighIn.date} onChange={(e) => setWeighIn((w) => ({ ...w, date: e.target.value }))} />
               </Field>
               <Field label="Weight (lb)">
                 <Input
