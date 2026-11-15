@@ -13,7 +13,7 @@ Plate Plan is a nutrition planner for University of Illinois Urbana-Champaign st
 
 > The API runs on a free server that sleeps when idle. The first request after a quiet spell can take up to a minute; open the API docs link first to wake it.
 
-A CS 196 (Fall 2026) group project. See [Team](#team).
+Built by a team of six. **I (Valerie Yu) built the data and backend side**: the menu scraper and data pipeline, the database, meal targets and menu filtering, dining-hall picks, workouts, the energy balance with weigh-in calibration, campus events, account features and most of the backend tests. I made 37 of the project's 92 commits, the most on the team. Details in [My contributions](#my-contributions).
 
 ---
 
@@ -140,9 +140,44 @@ Full request and response examples are in [`Docs/API.md`](Docs/API.md). JSON, IS
 | Tracking | `POST/GET/DELETE /users/{id}/food-logs`, `POST/GET/DELETE /users/{id}/weight-logs`, `GET /users/{id}/progress`, `GET /users/{id}/energy` |
 | Workouts | `GET /exercises`, `GET /users/{id}/workout`, `POST/GET/DELETE /users/{id}/workout-logs`, `GET /events` |
 
+## My contributions
+
+Everything below is my own work, in [`Project/backend`](Project/backend) unless noted.
+
+**Menu data pipeline**
+- Wrote the EatSmart scraper ([`scraper/menu_scraper.py`](Project/backend/scraper/menu_scraper.py)) from scratch: discovers halls, stations, dates and meals, reads every dish's nutrition label, parses serving sizes, separates allergens from diet tags, skips incomplete dishes, and upserts into the database without duplicates. Each hall is saved as it finishes, so a dropped connection loses at most one hall.
+- Designed the `menuitem` table and the "recommendable" flag that keeps salad bars, drinks and condiments out of recommendations.
+- Wrote the script that copies menus into the production PostgreSQL database in one batch, and kept the live data fresh all semester: about 60,000 dishes from 12 dining units.
+- Wrote a sample menu dataset so the recommender could be developed and tested without a database.
+
+**Backend foundations**
+- Wrote the API specification ([`Docs/API.md`](Docs/API.md)) the frontend was built against, and many of its endpoints: goal targets, halls and menus, meal targets, progress, weight logs and undoing a food log.
+- Wrote the allergy and diet filters ([`app/dietary.py`](Project/backend/app/dietary.py)).
+- Wrote the nutrition baseline: daily calorie and macro targets, the per-meal split, carrying what was eaten at one meal over to the meals still to come, and fitting macros inside the calorie target with protein first.
+- Added "choose which meals you eat": the day's calories are shared only between the meals a user actually eats.
+
+**Meal recommendations**
+- Added meal-sense rules on top of the beam-search recommender (no sauces or condiments as a dish, every dish worth eating, at most one dessert, at least two dishes, no duplicates, at most two servings per dish) and "show me another".
+- Built the dining-hall picks ([`app/picks.py`](Project/backend/app/picks.py)): a 0-100 match score per hall for the next meal and a high-protein plate per hall, plus the frontend card for it.
+- Built the meal-first flow in the frontend: pick the meal, then the hall, then log or swap the recommended tray.
+
+**Workouts and energy**
+- Wrote the exercise library (30 moves with how-to steps, tips and video links) and the workout planner ([`app/exercises.py`](Project/backend/app/exercises.py), [`app/workout.py`](Project/backend/app/workout.py)): warm-up, main block and cool-down for chosen muscle groups, length and intensity, with or without equipment, balanced across movement patterns so a plan doesn't repeat the same move.
+- Wrote workout logging with calories burned estimated from body weight.
+- Wrote the daily energy balance and goal progress ([`app/energy.py`](Project/backend/app/energy.py)), including calibration: real weigh-ins are compared with the predicted weight and the calorie target is adjusted (within safe limits). Workouts already covered by the user's activity level aren't counted twice.
+- Wrote the campus fitness events feed ([`app/events.py`](Project/backend/app/events.py)) from the university calendar.
+
+**Accounts and data quality**
+- Added quick-add food logs, deleting weigh-ins (the plan is recalculated), profile editing, password change and account deletion.
+- Made "today" follow campus (Chicago) time and limited logging to today and the past seven days.
+- Ran full end-to-end walkthroughs of the live app and fixed what they found.
+
+**Testing**
+- Wrote most of the 270+ backend tests: scraper parsing, nutrition and meal targets, recommendations on real menus, workouts, energy balance, accounts and end-to-end API flows.
+
 ## Team
 
-CS 196 (Fall 2026), Group 6:
+Built with:
 
 - Valerie Yu ([@Valerieyu77](https://github.com/Valerieyu77))
 - Grace ([@gracee-s](https://github.com/gracee-s))
@@ -155,5 +190,5 @@ CS 196 (Fall 2026), Group 6:
 
 - Branch off `master`, push your branch and open a pull request; a teammate reviews it before it is merged.
 - Merge with **Create a merge commit** (not squash or rebase).
-- Announce changes to shared things (table columns, API shapes, `Docs/API.md`) in the group chat first.
+- Announce changes to shared things (table columns, API shapes, `Docs/API.md`) with the team first.
 - Keep secrets out of the repository: no database URLs, passwords or keys in code or commits.
