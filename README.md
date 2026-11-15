@@ -13,7 +13,7 @@ Plate Plan is a nutrition planner for University of Illinois Urbana-Champaign st
 
 > The API runs on a free server that sleeps when idle. The first request after a quiet spell can take up to a minute; open the API docs link first to wake it.
 
-Built by a team of six. **I (Valerie Yu) built the data and backend side**: the menu scraper and data pipeline, the database, meal targets and menu filtering, dining-hall picks, workouts, the energy balance with weigh-in calibration, campus events, account features and most of the backend tests. I made 37 of the project's 92 commits, the most on the team. Details in [My contributions](#my-contributions).
+**I (Valerie Yu) built the data and backend side**: the menu scraper and data pipeline, the database, meal targets and menu filtering, dining-hall picks, workouts, the energy balance with weigh-in calibration, campus events, account features and most of the backend tests. I made 37 of the project's 92 commits, the most on the team. Details in [My contributions](#my-contributions).
 
 ---
 
