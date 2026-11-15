@@ -1,45 +1,95 @@
-# Group 6
-Group Name: TEAM_NAME
+# Plate Plan
 
-[MVP Link](https://docs.google.com/document/d/1mmSCIEQjmluVGSqgNbrygXDC9vFZJ26P/edit?pli=1)
+**Know what to eat before you reach the dining hall.**
 
-Team Members: pinkiey2, gracees7, markw8, ay29
+Plate Plan is a nutrition planner for University of Illinois Urbana-Champaign students who eat in the dining halls. It reads the real campus menus every week, sets daily calorie and macro targets for your goal, and tells you which dishes to take, and how much of each, for your next meal. It also plans workouts and tracks food, exercise and weight in one place.
 
+| | Link |
+|---|---|
+| **Live app** | https://plate-plan-group6.vercel.app |
+| **Live API (interactive docs)** | https://fa26-group6.onrender.com/docs |
+| **API specification** | [`Docs/API.md`](Docs/API.md) |
+| **How to run the frontend** | [`Docs/RUN.md`](Docs/RUN.md) |
+| **Project plan (MVP)** | [MVP document](https://docs.google.com/document/d/1mmSCIEQjmluVGSqgNbrygXDC9vFZJ26P/edit?pli=1) |
 
-Project Manager: uzairs2
+> The API runs on a free server that sleeps when idle. The first request after a quiet spell can take up to a minute; open the API docs link first to wake it.
+
+CS 196 (Fall 2026), Group 6. Team: Valerie Yu ([@Valerieyu77](https://github.com/Valerieyu77)), Grace ([@gracee-s](https://github.com/gracee-s)), Andrew ([@AndrewYYX](https://github.com/AndrewYYX)), Mark ([@Mark-dot-create](https://github.com/Mark-dot-create)), Sacha ([@Sachavk8](https://github.com/Sachavk8)). Project manager: Uzair ([@uzairs2](https://github.com/uzairs2)).
 
 ---
 
-## What this project does
+## What it does
 
-Recommends specific UIUC dining hall dishes, and how much of each, based on a user's weight goal.
+**Plan a meal**
+- Sign up with height, weight, age, sex, activity level, allergies and diet (vegetarian, vegan, ...).
+- Pick a goal: lose, maintain or gain weight, optionally with a target weight and date (the pace is capped at a safe rate).
+- Get daily calorie, protein, carb and fat targets, split across the meals you actually eat (for example, only lunch and dinner).
+- Choose a meal and see which dining hall fits it best, then get a recommended plate: specific dishes and servings that add up to what is left for that meal. "Show me another" gives a different plate.
+- Allergens and diet are filtered out automatically.
+- If one meal was small, the meals still to come get a bigger share of the day.
 
-1. Sign up with height, weight, age (birthdate), sex, activity level, allergies and dietary restrictions
-2. Pick a goal: lose, maintain or gain
-3. The app calculates daily calorie, protein, carb and fat targets
-4. Pick a dining hall and a meal (e.g. ISR lunch) and get recommended dishes that fit what is left for that meal
-5. Check off what you ate; the app logs it
-6. The progress page shows target vs actual, and your weight trend
+**Track**
+- Log the dishes you ate with one tap, or quick-add food from anywhere else (name and calories).
+- Log weigh-ins. The app compares your real weight with the predicted one and adjusts your calorie target.
+- See each day's calories eaten against calories burned, and progress toward your goal weight.
 
-## How it fits together
+**Work out**
+- Get a workout plan for the muscle groups, length and intensity you choose, with or without gym equipment. Each move has how-to steps, a tip and a video link.
+- Log workouts. Calories burned are estimated from your body weight and count toward the day's balance.
+- See upcoming campus fitness events, taken from the university calendar.
+
+**Account**
+- Log in securely, edit your profile, change your password or delete your account and all its data.
+
+## How it works
 
 ```
-UIUC EatSmart menus  ->  scraper  ->  PostgreSQL (Neon)  <->  FastAPI backend  <->  React frontend
+UIUC EatSmart menus ──► scraper ──► PostgreSQL (Neon) ◄──► FastAPI backend ◄──► React frontend
+     (12 dining units)     (weekly)                           (Render)              (Vercel)
 ```
 
-| Part | Folder | What it is |
+| Part | Tech | Folder |
 |---|---|---|
-| Frontend | `Project/frontend` | React + Vite app (Plate Plan design) |
-| Backend API | `Project/backend/app` | FastAPI + SQLModel |
-| Menu scraper | `Project/backend/scraper` | Collects dining hall menus and nutrition into the database |
-| Tests | `Project/backend/tests` | pytest |
-| Docs | `Docs` | API specification (`API.md`), how to run the frontend (`RUN.md`) |
+| Frontend | React 19, Vite, Tailwind CSS | [`Project/frontend`](Project/frontend) |
+| Backend API | Python, FastAPI, SQLModel, JWT login | [`Project/backend/app`](Project/backend/app) |
+| Database | PostgreSQL on Neon (SQLite for local development) | tables in [`app/models.py`](Project/backend/app/models.py) |
+| Menu scraper | requests, BeautifulSoup | [`Project/backend/scraper`](Project/backend/scraper) |
+| Tests | pytest, 270+ tests | [`Project/backend/tests`](Project/backend/tests) |
 
-## Getting started
+Main backend modules:
 
-### Backend
+| File | What it does |
+|---|---|
+| `nutrition.py` | Daily targets (BMR × activity) and the per-meal split |
+| `timeline.py` | Target weight and date, with safe-pace limits |
+| `dietary.py` | Allergy and diet filters |
+| `recommend.py` | Chooses dishes and servings for a meal (beam search) and the workout template |
+| `picks.py` | Scores each dining hall for your next meal |
+| `exercises.py`, `workout.py` | Exercise library and workout plans |
+| `energy.py` | Daily energy balance, goal progress, calibration from weigh-ins |
+| `events.py` | Campus fitness events from the university calendar |
+| `auth.py` | Sign-up, login and access control |
 
-You need Python 3 (3.12 or newer is a safe choice). From the repository root:
+## Menu data
+
+Menus come from [UIUC EatSmart](https://eatsmart.housing.illinois.edu/NetNutrition/46). The scraper walks hall → station → date and meal → dish → nutrition label, cleans each dish and saves it. It covers 12 dining units: Ikenberry, ISR, PAR, LAR, Field of Greens, Kosher Kitchen, TerraByte, InfiniTEA, Urbana South Market, 57 North, Caffeinator and Everybody Eats.
+
+- About 60,000 dishes are loaded so far (fall 2026 semester). Menus are published about three weeks ahead and are refreshed by hand weekly.
+- Only main meals (breakfast, lunch, dinner) are recommended. Salad bar, cereal, drinks and condiments are stored but not recommended.
+- Dishes missing calories or macros are skipped, and "NA" values are stored as empty, not zero.
+
+```sh
+cd Project/backend
+python -m scraper.menu_scraper --days 14                  # today + 13 days, all halls
+python -m scraper.menu_scraper --days 3 --halls 1 11 --dry-run --json out.json   # try it without saving
+python -m scraper.copy_menu_to_db                          # copy local menus to the shared DB (needs DATABASE_URL)
+```
+
+## Run it locally
+
+You need Python 3.12+ and Node.js 20+.
+
+**Backend** (from the repository root):
 
 ```sh
 cd Project/backend
@@ -49,11 +99,9 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload
 ```
 
-Then open http://127.0.0.1:8000/docs for the interactive API page.
+Open http://127.0.0.1:8000/docs. With nothing configured, the backend uses a local SQLite file (`nutrition.db`); fill it with the scraper above. To use the shared PostgreSQL database, put `DATABASE_URL=...` in `Project/backend/.env`. **Never commit it**: `.env` and `*.db` are in `.gitignore`.
 
-**Database.** With nothing configured, the backend uses a local SQLite file (`nutrition.db`, empty at first). To use the shared PostgreSQL database instead, set `DATABASE_URL`, either in your terminal (`export DATABASE_URL='...'`) or in a file `Project/backend/.env` containing `DATABASE_URL=...`. Ask a teammate for the value. **Never commit the connection string**: `.env` and `*.db` are already in `.gitignore`.
-
-### Frontend
+**Frontend** (in a second terminal):
 
 ```sh
 cd Project/frontend
@@ -61,9 +109,9 @@ npm install
 npm run dev
 ```
 
-The frontend currently runs on sample data; connecting it to the API is in progress. See `Docs/RUN.md`.
+Open http://localhost:5173. The frontend talks to the local backend by default; to use another one, copy `.env.example` to `.env.local` and change `VITE_API_URL`. The backend only accepts the frontend on port 5173 or 3000.
 
-### Tests
+**Tests:**
 
 ```sh
 cd Project/backend
@@ -71,70 +119,41 @@ pip install -r requirements.txt -r requirements-dev.txt
 python -m pytest
 ```
 
-## API
+## Deployment
 
-The full specification, with request and response examples for every endpoint, is in [`Docs/API.md`](Docs/API.md). Conventions: JSON, ISO dates (`2026-10-08`), weight in lbs, height in inches, nutrients in grams (sodium in mg), and all menu nutrients are per **one** serving.
+- **Backend:** Render redeploys automatically on every push to `master`. `DATABASE_URL` (and the JWT secret) are set in Render's environment settings.
+- **Frontend:** deployed by hand from the Vercel project owner's computer. Always pull first, or old code gets deployed:
+  ```sh
+  git switch master && git pull
+  cd Project/frontend && npx vercel deploy --prod
+  ```
 
-| Endpoint | Purpose | Status |
-|---|---|---|
-| `POST /users`, `GET /users/{id}` | Sign up and read a profile | Done |
-| `PUT /users/{id}/goal`, `GET /users/{id}/goal` | Pick lose / maintain / gain, get daily targets | Done |
-| `GET /halls`, `GET /meal-options`, `GET /meals` | Halls (optionally only those serving a meal), the meals a hall serves grouped as breakfast / lunch / dinner, and the raw meal names | Done |
-| `GET /menu-items` | Dishes on a menu, filtered for a user's allergies and diet | Done |
-| `GET /users/{id}/meal-target` | What is left to eat at this meal (adjusted for what was already logged) | Done |
-| `POST/GET/DELETE /users/{id}/food-logs` | Log, list and un-check eaten dishes | Done |
-| `POST/GET /users/{id}/weight-logs` | Log and list weigh-ins | Done |
-| `GET /users/{id}/progress` | Target vs actual for a day, plus weight history | Done |
-| `GET /users/{id}/hall-picks` | Which hall fits the user's next meal best (match score) and a high-protein plate per hall | Done |
-| `GET /recommendations/meals` | Recommended dishes for a meal (never breaks: falls back to a placeholder) | Done |
+## API overview
 
-## Menu data
+Full request and response examples are in [`Docs/API.md`](Docs/API.md). JSON, ISO dates, pounds and inches, nutrients in grams per one serving.
 
-Menus come from the UIUC EatSmart site (`eatsmart.housing.illinois.edu/NetNutrition`). The scraper walks hall -> station -> date and meal -> dish -> nutrition label, cleans each dish and saves it to the `menuitem` table. It covers all 12 dining units, which publish menus about three weeks ahead.
-
-```sh
-cd Project/backend
-python -m scraper.menu_scraper --days 14          # today + 13 days, all halls, saved to the database
-python -m scraper.menu_scraper --days 3 --halls 1 11 --dry-run --json out.json   # try it without saving
-```
-
-- Running it again updates existing rows instead of duplicating them. Each hall is saved as soon as it finishes.
-- To copy a local database into the shared one: `python -m scraper.copy_menu_to_db` (with `DATABASE_URL` set).
-- `data/menu_sample.json` is a small snapshot (recommendable dishes only, Oct 7-9 2026) for developing the recommendation function without a database.
-- A weekly GitHub Actions job is set up in `.github/workflows/scrape-menus.yml`, but GitHub currently refuses to start workflows for this organization (a billing / spending-limit message), so for now the scraper is run by hand about once a week.
-
-Things worth knowing about the data:
-- `meal` is the site's own menu name, lowercase: `breakfast`, `lunch`, `light lunch`, `dinner`, and also `salad bar`, `beverages`, and so on. Not every hall serves every meal (Ike has a light lunch, LAR has no breakfast), so list a hall's meals with `GET /meal-options` instead of hardcoding them.
-- `is_recommendable` is true only for main meals. Side menus are stored but marked false.
-- `allergens` holds the site's tags. Which ones count as real allergens (Milk, Peanuts, ...) and which are just labels (Kosher, Halal, Pork, ...) is defined in `app/dietary.py`.
-- Dishes missing calories or any macro are skipped. Values the site marks "NA" are stored as empty, not zero.
-
-## Database tables
-
-Defined in `Project/backend/app/models.py`.
-
-| Table | What it stores |
+| Area | Endpoints |
 |---|---|
-| `user` | Profile: height, weight (lbs/in), sex, birthdate, activity level, allergies, dietary restrictions |
-| `goal` | One row per user: daily calorie / protein / carb / fat targets |
-| `weightlog` | Weigh-ins over time |
-| `foodlog` | What a user ate: dish, servings, date, meal |
-| `menuitem` | Every scraped dish with per-serving nutrition, tags and serving size |
+| Account | `POST /auth/signup`, `POST /auth/login`, `GET /auth/me`, `POST /auth/change-password`, `GET/PATCH/DELETE /users/{id}`, `PUT /users/{id}/meals` |
+| Goal | `PUT/GET /users/{id}/goal`, `POST /users/{id}/goal/preview`, `GET /users/{id}/goal/timeline`, `GET /users/{id}/goal/progress` |
+| Menus | `GET /halls`, `GET /meal-options`, `GET /meals`, `GET /menu-items` |
+| Meal planning | `GET /users/{id}/meal-target`, `GET /users/{id}/hall-picks`, `GET /recommendations/meals` |
+| Tracking | `POST/GET/DELETE /users/{id}/food-logs`, `POST/GET/DELETE /users/{id}/weight-logs`, `GET /users/{id}/progress`, `GET /users/{id}/energy` |
+| Workouts | `GET /exercises`, `GET /users/{id}/workout`, `POST/GET/DELETE /users/{id}/workout-logs`, `GET /events` |
+
+## Team
+
+| Who | Role | Main work |
+|---|---|---|
+| Valerie Yu | Data and backend | Menu scraper and data, database, menu and hall endpoints, workouts, energy balance and weigh-in calibration, campus events, account features, tests |
+| Grace | API, deployment, auth | Endpoints, Render deployment, login (JWT), goal timelines |
+| Andrew, Mark | Frontend | React app: meal planning, tracking, workouts, settings |
+| Sacha | Recommendation engine | Beam-search plate recommender, workout template |
+| Uzair | Project manager | Planning and coordination |
 
 ## Working together
 
-- Branch off `master`, push your branch, and open a pull request. Another teammate looks at it before it is merged.
-- Merge with **Create a merge commit** (not squash or rebase), so branches built on each other stay in sync.
+- Branch off `master`, push your branch and open a pull request; a teammate reviews it before it is merged.
+- Merge with **Create a merge commit** (not squash or rebase).
 - Announce changes to shared things (table columns, API shapes, `Docs/API.md`) in the group chat first.
 - Keep secrets out of the repository: no database URLs, passwords or keys in code or commits.
-
-## Roles
-
-| Role | Responsibility |
-|---|---|
-| A, Data | Project setup, menu scraping, data cleaning, database, testing |
-| B, Nutrition targets | Daily and per-meal targets, dietary filtering, progress calculations |
-| C, API / integration | API endpoints, deployment, working with the frontend |
-| D, Recommendation engine | Choosing dishes for a meal (see `app/recommend.py` once merged) |
-
-The full plan, with tools and task lists, is in the MVP document linked at the top.
