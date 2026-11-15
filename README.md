@@ -10,11 +10,10 @@ Plate Plan is a nutrition planner for University of Illinois Urbana-Champaign st
 | **Live API (interactive docs)** | https://fa26-group6.onrender.com/docs |
 | **API specification** | [`Docs/API.md`](Docs/API.md) |
 | **How to run the frontend** | [`Docs/RUN.md`](Docs/RUN.md) |
-| **Project plan (MVP)** | [MVP document](https://docs.google.com/document/d/1mmSCIEQjmluVGSqgNbrygXDC9vFZJ26P/edit?pli=1) |
 
 > The API runs on a free server that sleeps when idle. The first request after a quiet spell can take up to a minute; open the API docs link first to wake it.
 
-CS 196 (Fall 2026), Group 6. Team: Valerie Yu ([@Valerieyu77](https://github.com/Valerieyu77)), Grace ([@gracee-s](https://github.com/gracee-s)), Andrew ([@AndrewYYX](https://github.com/AndrewYYX)), Mark ([@Mark-dot-create](https://github.com/Mark-dot-create)), Sacha ([@Sachavk8](https://github.com/Sachavk8)). Project manager: Uzair ([@uzairs2](https://github.com/uzairs2)).
+A CS 196 (Fall 2026) group project. See [Team](#team).
 
 ---
 
@@ -143,13 +142,14 @@ Full request and response examples are in [`Docs/API.md`](Docs/API.md). JSON, IS
 
 ## Team
 
-| Who | Role | Main work |
-|---|---|---|
-| Valerie Yu | Data and backend | Menu scraper and data, database, menu and hall endpoints, workouts, energy balance and weigh-in calibration, campus events, account features, tests |
-| Grace | API, deployment, auth | Endpoints, Render deployment, login (JWT), goal timelines |
-| Andrew, Mark | Frontend | React app: meal planning, tracking, workouts, settings |
-| Sacha | Recommendation engine | Beam-search plate recommender, workout template |
-| Uzair | Project manager | Planning and coordination |
+CS 196 (Fall 2026), Group 6:
+
+- Valerie Yu ([@Valerieyu77](https://github.com/Valerieyu77))
+- Grace ([@gracee-s](https://github.com/gracee-s))
+- Andrew ([@AndrewYYX](https://github.com/AndrewYYX))
+- Mark ([@Mark-dot-create](https://github.com/Mark-dot-create))
+- Sacha ([@Sachavk8](https://github.com/Sachavk8))
+- Uzair ([@uzairs2](https://github.com/uzairs2)), project manager
 
 ## Working together
 
